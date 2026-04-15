@@ -23,12 +23,39 @@ void main_loop__em(void) {}
 #define HPF_CUTOFF_FACTOR 80 /* Higher values = stronger filtering. */
 #define HPF_ORDER 8
 
+/* Wave Config */
+#define BASE_AMP 0.2f
+#define BASE_FREQ 220.0f
+#define BASE_TYPE ma_waveform_type_sawtooth
+
 static ma_node_graph g_nodeGraph;
 static ma_lpf_node g_lpfNode;
 static ma_hpf_node g_hpfNode;
 static ma_splitter_node g_splitterNode;
-static ma_waveform g_sawWave;
-static ma_data_source_node g_sawNode;
+static ma_waveform g_Wave;
+static ma_data_source_node g_waveNode;
+static ma_waveform_type g_waveform = BASE_TYPE;
+
+void toggle(ma_waveform_type *waveform) {
+  ma_waveform_type type;
+  switch (*waveform) {
+  ma_waveform_type_sine:
+    *waveform = ma_waveform_type_square;
+    break;
+  ma_waveform_type_square:
+    *waveform = ma_waveform_type_sawtooth;
+    break;
+  ma_waveform_type_sawtooth:
+    *waveform = ma_waveform_type_triangle;
+    break;
+  ma_waveform_type_triangle:
+    *waveform = ma_waveform_type_sine;
+    break;
+  // should never happen
+  default:
+    *waveform = ma_waveform_type_sine;
+  }
+}
 
 void data_callback(ma_device *pDevice, void *pOutput, const void *pInput,
                    ma_uint32 frameCount) {
@@ -103,31 +130,31 @@ int main(void) {
     ma_node_attach_output_bus(&g_splitterNode, 1, &g_hpfNode, 0);
   }
 
-  /* Saw Wave */
+  /* Wave */
   {
-    ma_waveform_config sawWaveConfig = ma_waveform_config_init(
-        FORMAT, CHANNELS, SAMPLE_RATE, ma_waveform_type_sawtooth, 0.2, 220.0);
+    ma_waveform_config waveConfig = ma_waveform_config_init(
+        FORMAT, CHANNELS, SAMPLE_RATE, g_waveform, 0.2, 220.0);
 
-    result = ma_waveform_init(&sawWaveConfig, &g_sawWave);
+    result = ma_waveform_init(&waveConfig, &g_Wave);
     if (result != MA_SUCCESS) {
-      printf("*error* failed to initialize saw waveform.\n");
+      printf("*error* failed to initialize wave waveform.\n");
       goto cleanup_splitter;
     }
   }
 
-  /* Wrap saw wave as a data source node and attach it to the graph */
+  /* Wrap wave as a data source node and attach it to the graph */
   {
-    ma_data_source_node_config sawNodeConfig =
-        ma_data_source_node_config_init(&g_sawWave);
+    ma_data_source_node_config waveNodeConfig =
+        ma_data_source_node_config_init(&g_Wave);
 
-    result = ma_data_source_node_init(&g_nodeGraph, &sawNodeConfig, NULL,
-                                      &g_sawNode);
+    result = ma_data_source_node_init(&g_nodeGraph, &waveNodeConfig, NULL,
+                                      &g_waveNode);
     if (result != MA_SUCCESS) {
-      printf("*error* failed to initialize saw node.\n");
+      printf("*error* failed to initialize wave node.\n");
       goto cleanup_splitter;
     }
 
-    ma_node_attach_output_bus(&g_sawNode, 0, &g_splitterNode, 0);
+    ma_node_attach_output_bus(&g_waveNode, 0, &g_splitterNode, 0);
   }
 
   /* Playback Device */
@@ -145,7 +172,7 @@ int main(void) {
     result = ma_device_init(NULL, &deviceConfig, &device);
     if (result != MA_SUCCESS) {
       printf("*error* failed to initialize playback device.\n");
-      goto cleanup_saw;
+      goto cleanup_wave;
     }
 
     printf("*info* device name: %s\n", device.playback.name);
@@ -154,7 +181,7 @@ int main(void) {
     if (result != MA_SUCCESS) {
       printf("*error* failed to start playback device.\n");
       ma_device_uninit(&device);
-      goto cleanup_saw;
+      goto cleanup_wave;
     }
 
 #ifdef __EMSCRIPTEN__
@@ -167,8 +194,8 @@ int main(void) {
     ma_device_uninit(&device);
   }
 
-cleanup_saw:
-  ma_data_source_node_uninit(&g_sawNode, NULL);
+cleanup_wave:
+  ma_data_source_node_uninit(&g_waveNode, NULL);
 cleanup_splitter:
   ma_splitter_node_uninit(&g_splitterNode, NULL);
 cleanup_hpf:
