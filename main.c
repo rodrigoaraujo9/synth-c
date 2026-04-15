@@ -34,26 +34,23 @@ static ma_hpf_node g_hpfNode;
 static ma_splitter_node g_splitterNode;
 static ma_waveform g_Wave;
 static ma_data_source_node g_waveNode;
-static ma_waveform_type g_waveform = BASE_TYPE;
+static ma_waveform_type g_waveform;
 
 void toggle(ma_waveform_type *waveform) {
   ma_waveform_type type;
   switch (*waveform) {
-  ma_waveform_type_sine:
+  case ma_waveform_type_sine:
     *waveform = ma_waveform_type_square;
     break;
-  ma_waveform_type_square:
+  case ma_waveform_type_square:
     *waveform = ma_waveform_type_sawtooth;
     break;
-  ma_waveform_type_sawtooth:
+  case ma_waveform_type_sawtooth:
     *waveform = ma_waveform_type_triangle;
     break;
-  ma_waveform_type_triangle:
+  case ma_waveform_type_triangle:
     *waveform = ma_waveform_type_sine;
     break;
-  // should never happen
-  default:
-    *waveform = ma_waveform_type_sine;
   }
 }
 
@@ -132,8 +129,9 @@ int main(void) {
 
   /* Wave */
   {
+    g_waveform = BASE_TYPE;
     ma_waveform_config waveConfig = ma_waveform_config_init(
-        FORMAT, CHANNELS, SAMPLE_RATE, g_waveform, 0.2, 220.0);
+        FORMAT, CHANNELS, SAMPLE_RATE, g_waveform, BASE_AMP, BASE_FREQ);
 
     result = ma_waveform_init(&waveConfig, &g_Wave);
     if (result != MA_SUCCESS) {
