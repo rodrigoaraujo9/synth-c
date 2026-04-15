@@ -14,13 +14,14 @@ void main_loop__em(void) {}
 
 /* Effect Properties */
 #define LPF_BIAS                                                               \
-  0.9f /* Higher values make the low-pass filter more audible. Must be between \
-          0 and 1. */
-#define LPF_CUTOFF_FACTOR 80 /* Higher values = stronger filtering. */
-#define LPF_ORDER 8
+  0.95f // Higher values make the low-pass filter more audible. Must be between
+        // 0 and 1.
+#define LPF_CUTOFF 800.0f // the lower the more evident
+#define LPF_ORDER                                                              \
+  8 // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
 
-#define HPF_BIAS (1.0f - LPF_BIAS)
-#define HPF_CUTOFF_FACTOR 80 /* Higher values = stronger filtering. */
+#define HPF_BIAS (1.0f - LPF_BIAS) // inverse to lpf bias for now
+#define HPF_CUTOFF 300.0f          // the higher the more evident
 #define HPF_ORDER 8
 
 /* Wave Config */
@@ -79,8 +80,8 @@ int main(void) {
 
   /* Low Pass Filter */
   {
-    ma_lpf_node_config lpfNodeConfig = ma_lpf_node_config_init(
-        CHANNELS, SAMPLE_RATE, SAMPLE_RATE / LPF_CUTOFF_FACTOR, LPF_ORDER);
+    ma_lpf_node_config lpfNodeConfig =
+        ma_lpf_node_config_init(CHANNELS, SAMPLE_RATE, LPF_CUTOFF, LPF_ORDER);
 
     result = ma_lpf_node_init(&g_nodeGraph, &lpfNodeConfig, NULL, &g_lpfNode);
     if (result != MA_SUCCESS) {
@@ -97,7 +98,7 @@ int main(void) {
   /* High Pass Filter */
   {
     ma_hpf_node_config hpfNodeConfig = ma_hpf_node_config_init(
-        CHANNELS, SAMPLE_RATE, SAMPLE_RATE / HPF_CUTOFF_FACTOR, HPF_ORDER);
+        CHANNELS, SAMPLE_RATE, SAMPLE_RATE / HPF_CUTOFF, HPF_ORDER);
 
     result = ma_hpf_node_init(&g_nodeGraph, &hpfNodeConfig, NULL, &g_hpfNode);
     if (result != MA_SUCCESS) {
