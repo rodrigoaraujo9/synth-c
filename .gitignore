@@ -60,3 +60,6 @@ Makefile.in
 *.wasm
 *.js
 *.html
+
+synth
+lib/miniaudio.h
