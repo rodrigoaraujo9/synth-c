@@ -33,7 +33,6 @@ static ma_hpf_node g_hpfNode;
 static ma_splitter_node g_splitterNode;
 static ma_waveform g_Wave;
 static ma_data_source_node g_waveNode;
-static ma_waveform_type g_waveform;
 
 typedef struct {
     // include values for wave, effects etc that will be accessed concurrently
@@ -127,9 +126,7 @@ int main(void) {
 
   /* Wave */
     {
-        //use lock later or if is atomic handle some other way
-        g_waveform = BASE_TYPE;
-        ma_waveform_config waveConfig = ma_waveform_config_init(FORMAT, CHANNELS, SAMPLE_RATE, g_waveform, BASE_AMP, BASE_FREQ);
+        ma_waveform_config waveConfig = ma_waveform_config_init(FORMAT, CHANNELS, SAMPLE_RATE, BASE_TYPE, BASE_AMP, BASE_FREQ);
 
         result = ma_waveform_init(&waveConfig, &g_Wave);
         if (result != MA_SUCCESS) {
