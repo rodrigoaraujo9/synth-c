@@ -16,7 +16,7 @@ void main_loop__em(void) {}
 /* Effect Properties */
 #define LPF_BIAS 0.95f             // higher values make the low-pass filter more audible. Must be between 0 and 1.
 #define LPF_CUTOFF 800.0f          // the lower the more evident
-#define LPF_ORDER                  // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
+#define LPF_ORDER 8                // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
 
 #define HPF_BIAS (1.0f - LPF_BIAS) // inverse to lpf bias for now
 #define HPF_CUTOFF 300.0f          // the higher the more evident
