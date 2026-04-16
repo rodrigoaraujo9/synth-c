@@ -5,7 +5,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-void main_loop__em(void) {}
+    void main_loop__em(void) {}
 #endif
 
 /* Data Format */
