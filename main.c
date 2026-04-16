@@ -8,12 +8,17 @@
     void main_loop__em(void) {}
 #endif
 
-/* Data Format */
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Config */
+
+// Data Format
 #define FORMAT ma_format_f32
 #define CHANNELS 2
 #define SAMPLE_RATE 48000
 
-/* Effect Properties */
+
+// Effect Properties
 #define LPF_BIAS 0.95f             // higher values make the low-pass filter more audible. Must be between 0 and 1.
 #define LPF_CUTOFF 800.0f          // the lower the more evident
 #define LPF_ORDER 8                // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
@@ -22,10 +27,14 @@
 #define HPF_CUTOFF 300.0f          // the higher the more evident
 #define HPF_ORDER 8
 
-/* Wave Config */
+// Wave Config
 #define BASE_AMP 0.2f
 #define BASE_FREQ 220.0f
 #define BASE_TYPE ma_waveform_type_sawtooth
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Globals */
 
 static ma_node_graph g_nodeGraph;
 static ma_lpf_node g_lpfNode;
@@ -34,12 +43,26 @@ static ma_splitter_node g_splitterNode;
 static ma_waveform g_Wave;
 static ma_data_source_node g_waveNode;
 
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Types */
+
+// uses thread safe datastructures provided by miniaudio (STILL UNUSED)
 typedef struct {
-    // include values for wave, effects etc that will be accessed concurrently
-    ma_waveform_type g_waveform;
-    pthread_mutex_t lock;
+    ma_atomic_uint32   waveform;      // [0..4] will be mapped to ma_waveform_type
+
+    ma_atomic_float    lfo_frequency; // Hz
+    ma_atomic_float    lfo_depth;     // [0..1]
+
+    ma_atomic_float    lpf_cutoff;    // Hz
+    ma_atomic_float    hpf_cutoff;    // Hz
+
+    ma_atomic_uint32   octave_offset; // distance from base octave [-4..4] -> if notes are represented as the notes themselves
+    ma_atomic_float    pitch_offset;  // Semi-tones? Frequency?
+    ma_pcm_rb          active_notes;  // maybe frequency? maybe notes [0..11]
 } State;
 
+/* ------------------------------------------------------------------------------------------------------------- */
 
 /* Functions */
 
