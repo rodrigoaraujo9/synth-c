@@ -37,6 +37,7 @@ static ma_waveform_type g_waveform;
 
 typedef struct {
     // include values for wave, effects etc that will be accessed concurrently
+    ma_waveform_type g_waveform;
     pthread_mutex_t lock;
 } State;
 
