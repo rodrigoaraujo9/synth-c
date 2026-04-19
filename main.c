@@ -2,6 +2,7 @@
 #include "lib/miniaudio.h"
 #include <pthread.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -20,7 +21,7 @@
 
 // Effect Properties
 #define LPF_BIAS 0.95f             // higher values make the low-pass filter more audible. Must be between 0 and 1.
-#define LPF_CUTOFF 800.0f          // the lower the more evident
+#define LPF_CUTOFF 100.0f          // the lower the more evident
 #define LPF_ORDER 8                // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
 
 #define HPF_BIAS (1.0f - LPF_BIAS) // inverse to lpf bias for now
@@ -31,17 +32,6 @@
 #define BASE_AMP 0.2f
 #define BASE_FREQ 220.0f
 #define BASE_TYPE ma_waveform_type_sawtooth
-
-/* ------------------------------------------------------------------------------------------------------------- */
-
-/* Globals */
-
-static ma_node_graph g_nodeGraph;
-static ma_lpf_node g_lpfNode;
-static ma_hpf_node g_hpfNode;
-static ma_splitter_node g_splitterNode;
-static ma_waveform g_Wave;
-static ma_data_source_node g_waveNode;
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -59,40 +49,156 @@ typedef struct {
 
     ma_atomic_uint32   octave_offset; // distance from base octave [-4..4] -> if notes are represented as the notes themselves
     ma_atomic_float    pitch_offset;  // Semi-tones? Frequency?
-    ma_pcm_rb          active_notes;  // maybe frequency? maybe notes [0..11]
 } State;
+
+typedef enum {
+    SET_WAVE = 0,
+    NOTE_PRESSED,
+    NOTE_RELEASED,
+} Type;
+
+typedef struct {
+    Type type;
+    uint8_t value;
+} Event;
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
-/* Functions */
+/* Globals */
 
-// toggle waveform -> function that simmulates button click on arduino side
-void toggle(ma_waveform_type *waveform) {
-    ma_waveform_type type;
-    switch (*waveform) {
-        case ma_waveform_type_sine:
-            *waveform = ma_waveform_type_square;
-            break;
-        case ma_waveform_type_square:
-            *waveform = ma_waveform_type_sawtooth;
-            break;
-        case ma_waveform_type_sawtooth:
-            *waveform = ma_waveform_type_triangle;
-            break;
-        case ma_waveform_type_triangle:
+static State g_state;
+
+static ma_waveform g_wave;
+
+static ma_node_graph g_nodeGraph;
+static ma_lpf_node g_lpfNode;
+static ma_hpf_node g_hpfNode;
+static ma_splitter_node g_splitterNode;
+static ma_data_source_node g_waveNode;
+
+static ma_rb g_eventBuf;
+static unsigned char g_eventBufStore[sizeof(Event) * 256];
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Helper Functions */
+
+int push_event(const Event *event) {
+    void *buffer = NULL;
+    size_t bytes_to_write = sizeof(*event);
+
+    if (ma_rb_acquire_write(&g_eventBuf, &bytes_to_write, &buffer) != MA_SUCCESS) {
+        return 0;
+    }
+
+    if (bytes_to_write < sizeof(*event)) {
+        ma_rb_commit_write(&g_eventBuf, 0);
+        return 0;
+    }
+
+    memcpy(buffer, event, sizeof(*event));
+
+    return ma_rb_commit_write(&g_eventBuf, sizeof(*event)) == MA_SUCCESS;
+}
+
+int pop_event(Event *event) {
+    void *buffer = NULL;
+    size_t bytes_to_read = sizeof(*event);
+
+    if (ma_rb_acquire_read(&g_eventBuf, &bytes_to_read, &buffer) != MA_SUCCESS) {
+        return 0;
+    }
+
+    if (bytes_to_read < sizeof(*event)) {
+        ma_rb_commit_read(&g_eventBuf, 0);
+        return 0;
+    }
+
+    memcpy(event, buffer, sizeof(*event));
+
+    return ma_rb_commit_read(&g_eventBuf, sizeof(*event)) == MA_SUCCESS;
+}
+
+
+int waveform_from_uint8_t(uint8_t value, ma_waveform_type *waveform) {
+    if (waveform == NULL) {
+        return -1;
+    }
+
+    switch (value) {
+        case 0:
             *waveform = ma_waveform_type_sine;
-            break;
+            return 0;
+        case 1:
+            *waveform = ma_waveform_type_square;
+            return 0;
+        case 2:
+            *waveform = ma_waveform_type_triangle;
+            return 0;
+        case 3:
+            *waveform = ma_waveform_type_sawtooth;
+            return 0;
+        default:
+            return -1;
     }
 }
 
+/* Main Functions */
+
 void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount) {
+    Event event;
+
     MA_ASSERT(pDevice->playback.channels == CHANNELS);
+
+    while (pop_event(&event)) {
+        switch (event.type) {
+            case SET_WAVE: {
+                ma_waveform_type waveform;
+
+                if (waveform_from_uint8_t(event.value, &waveform) != 0) {
+                    break;
+                }
+
+                ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)waveform);
+                break;
+            }
+
+            case NOTE_PRESSED:
+                // mark that note is active and start envelope
+
+                break;
+
+            case NOTE_RELEASED:
+                // remove note from active notes and stop envelope
+                break;
+        }
+    }
+
+    {
+        ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
+        ma_waveform_set_type(&g_wave, waveform);
+    }
+
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
     (void)pInput;
 }
 
 int main(void) {
     ma_result result;
+
+    result = ma_rb_init(sizeof(g_eventBufStore), g_eventBufStore, NULL, &g_eventBuf);
+    if (result != MA_SUCCESS) {
+        printf("*error* failed to initialize event ring buffer.\n");
+        return -1;
+    }
+
+    ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)BASE_TYPE);
+    ma_atomic_float_set(&g_state.lfo_frequency, 0.0f);
+    ma_atomic_float_set(&g_state.lfo_depth, 0.0f);
+    ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF);
+    ma_atomic_float_set(&g_state.hpf_cutoff, HPF_CUTOFF);
+    ma_atomic_uint32_set(&g_state.octave_offset, 0);
+    ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
 
   /* Node Graph */
     {
@@ -121,7 +227,7 @@ int main(void) {
 
   /* High Pass Filter */
     {
-        ma_hpf_node_config hpfNodeConfig = ma_hpf_node_config_init(CHANNELS, SAMPLE_RATE, SAMPLE_RATE / HPF_CUTOFF, HPF_ORDER);
+        ma_hpf_node_config hpfNodeConfig = ma_hpf_node_config_init(CHANNELS, SAMPLE_RATE, HPF_CUTOFF, HPF_ORDER);
 
         result = ma_hpf_node_init(&g_nodeGraph, &hpfNodeConfig, NULL, &g_hpfNode);
         if (result != MA_SUCCESS) {
@@ -151,7 +257,7 @@ int main(void) {
     {
         ma_waveform_config waveConfig = ma_waveform_config_init(FORMAT, CHANNELS, SAMPLE_RATE, BASE_TYPE, BASE_AMP, BASE_FREQ);
 
-        result = ma_waveform_init(&waveConfig, &g_Wave);
+        result = ma_waveform_init(&waveConfig, &g_wave);
         if (result != MA_SUCCESS) {
             printf("*error* failed to initialize wave waveform.\n");
             goto cleanup_splitter;
@@ -160,7 +266,7 @@ int main(void) {
 
   /* Wrap wave as a data source node and attach it to the graph */
     {
-        ma_data_source_node_config waveNodeConfig = ma_data_source_node_config_init(&g_Wave);
+        ma_data_source_node_config waveNodeConfig = ma_data_source_node_config_init(&g_wave);
 
         result = ma_data_source_node_init(&g_nodeGraph, &waveNodeConfig, NULL, &g_waveNode);
         if (result != MA_SUCCESS) {
@@ -219,5 +325,6 @@ int main(void) {
   cleanup_graph:
     ma_node_graph_uninit(&g_nodeGraph, NULL);
 
+    ma_rb_uninit(&g_eventBuf);
     return 0;
 }
