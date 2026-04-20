@@ -41,21 +41,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void sendReceiveMessage(View view) {
-        String input = textInput.toString();
-        client.buffer = input.getBytes();
+        new Thread (() -> {
+            String input = textInput.getText().toString();
+            client.buffer = input.getBytes(StandardCharsets.UTF_8);
 
-        try {
-            client.sendPacket();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        
-        byte[] packet = null;
-        try {
+            try {
+                client.sendPacket();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+
+            byte[] packet = null;
+            try {
             packet = client.receivePacket();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        System.out.println("Received: " + Arrays.toString(packet));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            System.out.println("Received: " + Arrays.toString(packet));
+        }).start();
     }
 }

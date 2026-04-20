@@ -34,39 +34,4 @@ public class Client {
         socket.receive(packet);
         return packet.getData();
     }
-
-    public void run() {
-        Scanner scanner = new Scanner(System.in);
-
-        while (running) {
-            System.out.print("Write the message you want to send: ");
-            String input = scanner.nextLine();
-            buffer = input.getBytes(StandardCharsets.UTF_8);
-
-            try {
-                sendPacket();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-
-            byte[] packet = null;
-            try {
-                packet = receivePacket();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            System.out.println("Received: " + Arrays.toString(packet));
-        }
-    }
-
-    public void close() {
-        socket.close();
-    }
-
-    public int main() throws SocketException, UnknownHostException {
-        Client c = new Client(4000);
-        c.run();
-
-        return 0;
-    }
 }
