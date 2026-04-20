@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -63,7 +64,11 @@ typedef enum {
 
 typedef struct {
     Type type;
-    uint8_t value;
+
+    // for SET_WAVE directly represents wave selected
+    // for NOTE_PRESSED represents MIDI value associated with given note played -> consult table
+    // for NOTE_RELEASED also represents MIDI value, of the note we want to stop playing
+    ma_uint8 value;
 } Event;
 
 /* ------------------------------------------------------------------------------------------------------------- */
@@ -124,7 +129,7 @@ int pop_event(Event *event) {
 }
 
 
-int waveform_from_uint8_t(uint8_t value, ma_waveform_type *waveform) {
+int waveform_from_ma_uint8(ma_uint8 value, ma_waveform_type *waveform) {
     if (waveform == NULL) {
         return -1;
     }
@@ -147,8 +152,19 @@ int waveform_from_uint8_t(uint8_t value, ma_waveform_type *waveform) {
     }
 }
 
+// stub for converting midi notes to frequency since --> event's value passes MIDI number that represents note
+ma_float frequency_from_midi_note(ma_uint8 note) {
+    // c[-1] = 0
+    // a[4]  = 69
+    // to freq consider base -> 440 (a[4])
+    // do the math with distance from a[4]
+
+    return BASE_FREQ; // placeholder
+}
+
 /* Main Functions */
 
+// backend runs this funct on repeat
 void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount) {
     Event event;
 
@@ -159,7 +175,7 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             case SET_WAVE: {
                 ma_waveform_type waveform;
 
-                if (waveform_from_uint8_t(event.value, &waveform) != 0) {
+                if (waveform_from_ma_uint8(event.value, &waveform) != 0) {
                     break;
                 }
 
@@ -167,25 +183,22 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                 break;
             }
 
-            case NOTE_PRESSED:
-                bool pressed = ma_device_start(pDevice);
+            case NOTE_PRESSED: {
+                const float frequency = frequency_from_midi_note(event.value);
 
-                if (pressed != MA_SUCCESS) {
-                    printf("*error* failed to start playback device.\n");
-                    ma_device_uninit(pDevice);
-                }
-
-                ma_atomic_uint32_set(&g_state.active_note, 1);
+                ma_atomic_uint32_set(&g_state.active_note, (ma_uint32)event.value);
+                ma_atomic_float_set(&g_state.note_frequency, frequency);
+                ma_atomic_uint32_set(&g_state.note_active, 1);
                 break;
+            }
 
-            case NOTE_RELEASED:
-                bool released = ma_device_start(pDevice);
-                if (released != MA_SUCCESS) {
-                    printf("*error* failed to stop playback device.\n");
-                    ma_device_uninit(pDevice);
-                }
-                ma_atomic_uint32_set(&g_state.active_note, 0);
+            case NOTE_RELEASED: {
+                const ma_uint32 active_note = ma_atomic_uint32_get(&g_state.active_note);
+
+                if ((ma_uint32)event.value == active_note)
+                    ma_atomic_uint32_set(&g_state.note_active, 0);
                 break;
+            }
         }
     }
 
@@ -219,6 +232,9 @@ int main(void) {
     ma_atomic_float_set(&g_state.hpf_cutoff, HPF_CUTOFF);
     ma_atomic_uint32_set(&g_state.octave_offset, 0);
     ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
+    ma_atomic_uint32_set(&g_state.note_active, 0);
+    ma_atomic_uint32_set(&g_state.active_note, 0);
+    ma_atomic_float_set(&g_state.note_frequency, BASE_FREQ);
 
   /* Node Graph */
     {
@@ -323,6 +339,26 @@ int main(void) {
             printf("*error* failed to start playback device.\n");
             ma_device_uninit(&device);
             goto cleanup_wave;
+        }
+
+        // test to see that it is playing upon reading the buf
+        {
+            Event on = { NOTE_PRESSED, 69 };   /* A4 */
+            Event off = { NOTE_RELEASED, 69 }; /* release same note */
+
+            if (!push_event(&on)) {
+                printf("*error* failed to push NOTE_PRESSED event.\n");
+            } else {
+                printf("*info* NOTE_PRESSED sent.\n");
+            }
+
+            sleep(2);
+
+            if (!push_event(&off)) {
+                printf("*error* failed to push NOTE_RELEASED event.\n");
+            } else {
+                printf("*info* NOTE_RELEASED sent.\n");
+            }
         }
 
     #ifdef __EMSCRIPTEN__
