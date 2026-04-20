@@ -1,0 +1,65 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode / macOS user files
+*.xcuserstate
+*.xcworkspace
+xcuserdata/
+
+# Build output
+*.out
+*.app
+*.dSYM/
+build/
+dist/
+bin/
+
+# C compiled files
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+*.exe
+
+# Debug / profiling
+*.gcno
+*.gcda
+*.gcov
+gmon.out
+vgcore.*
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Autotools
+autom4te.cache/
+aclocal.m4
+configure
+config.log
+config.status
+libtool
+m4/
+Makefile.in
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Emscripten output
+*.wasm
+*.js
+*.html
+
+synth
+lib/miniaudio.h
