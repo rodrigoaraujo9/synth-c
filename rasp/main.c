@@ -20,7 +20,7 @@
 
 
 // Effect Properties
-#define LPF_BIAS 0.95f             // higher values make the low-pass filter more audible. Must be between 0 and 1.
+#define LPF_BIAS 0.5f              // higher values make the low-pass filter more audible. Must be between 0 and 1.
 #define LPF_CUTOFF 100.0f          // the lower the more evident
 #define LPF_ORDER 8                // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
 
@@ -48,7 +48,11 @@ typedef struct {
     ma_atomic_float    hpf_cutoff;    // Hz
 
     ma_atomic_uint32   octave_offset; // distance from base octave [-4..4] -> if notes are represented as the notes themselves
-    ma_atomic_float    pitch_offset;  // Semi-tones? Frequency?
+    ma_atomic_float    pitch_offset;  // Semi-tones makes more sense for logic but less for readability
+
+    ma_atomic_uint32 note_active;   /* 0 or 1 */
+    ma_atomic_uint32 active_note;   /* MIDI note number */
+    ma_atomic_float note_frequency; /* Hz */
 } State;
 
 typedef enum {
@@ -164,19 +168,35 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             }
 
             case NOTE_PRESSED:
-                // mark that note is active and start envelope
+                bool pressed = ma_device_start(pDevice);
 
+                if (pressed != MA_SUCCESS) {
+                    printf("*error* failed to start playback device.\n");
+                    ma_device_uninit(pDevice);
+                }
+
+                ma_atomic_uint32_set(&g_state.active_note, 1);
                 break;
 
             case NOTE_RELEASED:
-                // remove note from active notes and stop envelope
+                bool released = ma_device_start(pDevice);
+                if (released != MA_SUCCESS) {
+                    printf("*error* failed to stop playback device.\n");
+                    ma_device_uninit(pDevice);
+                }
+                ma_atomic_uint32_set(&g_state.active_note, 0);
                 break;
         }
     }
 
     {
-        ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
+        const ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
+        const float frequency = ma_atomic_float_get(&g_state.note_frequency);
+        const ma_uint32 note_active = ma_atomic_uint32_get(&g_state.note_active);
+
         ma_waveform_set_type(&g_wave, waveform);
+        ma_waveform_set_frequency(&g_wave, frequency);
+        ma_waveform_set_amplitude(&g_wave, note_active ? BASE_AMP : 0.0f);
     }
 
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
@@ -297,6 +317,7 @@ int main(void) {
 
         printf("*info* device name: %s\n", device.playback.name);
 
+
         result = ma_device_start(&device);
         if (result != MA_SUCCESS) {
             printf("*error* failed to start playback device.\n");
@@ -307,6 +328,8 @@ int main(void) {
     #ifdef __EMSCRIPTEN__
         emscripten_set_main_loop(main_loop__em, 0, 1);
     #else
+        //for now this is as was initially. will detect keypresses for now to test.
+        // will detect keypress and release and publish it on event buf. asynchronously read event buf (if detects != current active_note value -> act)
         printf("*info* press enter to quit...\n");
         getchar();
     #endif
