@@ -1,6 +1,9 @@
 package com.example.android;
 
 import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
@@ -8,27 +11,51 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import java.io.IOException;
 import java.net.SocketException;
 import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Scanner;
 
 public class MainActivity extends AppCompatActivity {
 
+    EditText textInput;
+    Button sendButton;
+
+    Client client;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        Client c = null;
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        textInput = (EditText) findViewById(R.id.inputText);
+        sendButton = (Button) findViewById(R.id.sendButton);
+
         try {
-            c = new Client(4000);
-        } catch (Exception e) {
+            client = new Client(4000);
+        } catch (SocketException | UnknownHostException e) {
             throw new RuntimeException(e);
         }
-        c.start();
-        super.onCreate(savedInstanceState);
-        EdgeToEdge.enable(this);
-        setContentView(R.layout.activity_main);
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
+    }
+
+    public void sendReceiveMessage(View view) {
+        String input = textInput.toString();
+        client.buffer = input.getBytes();
+
+        try {
+            client.sendPacket();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        
+        byte[] packet = null;
+        try {
+            packet = client.receivePacket();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        System.out.println("Received: " + Arrays.toString(packet));
     }
 }
