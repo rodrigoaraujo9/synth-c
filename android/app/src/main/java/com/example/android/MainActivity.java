@@ -4,6 +4,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
 
 import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
@@ -23,6 +24,8 @@ public class MainActivity extends AppCompatActivity {
     EditText textInput;
     Button sendButton;
 
+    TextView outputView;
+
     Client client;
 
     @Override
@@ -32,6 +35,7 @@ public class MainActivity extends AppCompatActivity {
 
         textInput = (EditText) findViewById(R.id.inputText);
         sendButton = (Button) findViewById(R.id.sendButton);
+        outputView = (TextView) findViewById(R.id.textView);
 
         try {
             client = new Client(4000);
@@ -57,7 +61,7 @@ public class MainActivity extends AppCompatActivity {
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
-            System.out.println("Received: " + Arrays.toString(packet));
+            outputView.setText(new String(packet, StandardCharsets.UTF_8));
         }).start();
     }
 }
