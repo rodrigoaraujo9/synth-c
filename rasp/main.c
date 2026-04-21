@@ -31,7 +31,8 @@
 
 // Wave Config
 #define BASE_AMP 0.2f
-#define BASE_FREQ 220.0f
+#define BASE_FREQ 440.0f // A4
+#define BASE_NOTE 69 // A4
 #define BASE_TYPE ma_waveform_type_sawtooth
 
 /* ------------------------------------------------------------------------------------------------------------- */
@@ -128,7 +129,6 @@ int pop_event(Event *event) {
     return ma_rb_commit_read(&g_eventBuf, sizeof(*event)) == MA_SUCCESS;
 }
 
-
 int waveform_from_ma_uint8(ma_uint8 value, ma_waveform_type *waveform) {
     if (waveform == NULL) {
         return -1;
@@ -152,15 +152,17 @@ int waveform_from_ma_uint8(ma_uint8 value, ma_waveform_type *waveform) {
     }
 }
 
-// stub for converting midi notes to frequency since --> event's value passes MIDI number that represents note
 ma_float frequency_from_midi_note(ma_uint8 note) {
     // c[-1] = 0
     // a[4]  = 69
     // to freq consider base -> 440 (a[4])
     // do the math with distance from a[4]
+    ma_float diff = note - BASE_NOTE;
+    ma_float freq = BASE_FREQ * ma_powf(2.0f, diff/12.0f);
 
-    return BASE_FREQ; // placeholder
+    return freq;
 }
+
 
 /* Main Functions */
 
@@ -341,7 +343,7 @@ int main(void) {
             goto cleanup_wave;
         }
 
-        // test to see that it is playing upon reading the buf
+        // test to see that it is reading the buf and executing the rpcs
         {
             Event on = { NOTE_PRESSED, 69 };   /* A4 */
             Event off = { NOTE_RELEASED, 69 }; /* release same note */
@@ -369,7 +371,6 @@ int main(void) {
         printf("*info* press enter to quit...\n");
         getchar();
     #endif
-
         ma_device_uninit(&device);
     }
 
