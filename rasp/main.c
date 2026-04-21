@@ -41,24 +41,22 @@
 
 // uses thread safe datastructures provided by miniaudio (STILL UNUSED)
 typedef struct {
-    ma_atomic_uint32   waveform;      // [0..4] will be mapped to ma_waveform_type
+    ma_atomic_uint32   waveform;       // [0..4] will be mapped to ma_waveform_type
 
-    ma_atomic_float    lfo_frequency; // Hz
-    ma_atomic_float    lfo_depth;     // [0..1]
+    ma_atomic_uint32   note_is_active; // 0 or 1
+    ma_atomic_uint32   note;           // MIDI note number -> base
 
-    ma_atomic_float    lpf_cutoff;    // Hz
-    ma_atomic_float    hpf_cutoff;    // Hz
+    ma_atomic_float    pitch_offset;   // Semi-tones makes more sense for logic but less for readability
 
-    ma_atomic_uint32   octave_offset; // distance from base octave [-4..4] -> if notes are represented as the notes themselves
-    ma_atomic_float    pitch_offset;  // Semi-tones makes more sense for logic but less for readability
+    ma_atomic_float    lfo_frequency;  // Hz
+    ma_atomic_float    lfo_depth;      // [0..1]
 
-    ma_atomic_uint32 note_active;   /* 0 or 1 */
-    ma_atomic_uint32 active_note;   /* MIDI note number */
-    ma_atomic_float note_frequency; /* Hz */
+    ma_atomic_float    lpf_cutoff;     // Hz
+    ma_atomic_float    hpf_cutoff;     // Hz
 } State;
 
 typedef enum {
-    SET_WAVE = 0,
+    SET_WAVE,
     NOTE_PRESSED,
     NOTE_RELEASED,
 } Type;
@@ -152,17 +150,16 @@ int waveform_from_ma_uint8(ma_uint8 value, ma_waveform_type *waveform) {
     }
 }
 
-ma_float frequency_from_midi_note(ma_uint8 note) {
+ma_float frequency_from_midi_note(ma_float note) {
     // c[-1] = 0
     // a[4]  = 69
     // to freq consider base -> 440 (a[4])
     // do the math with distance from a[4]
-    ma_float diff = note - BASE_NOTE;
-    ma_float freq = BASE_FREQ * ma_powf(2.0f, diff/12.0f);
+    const ma_float diff = note - BASE_NOTE;
+    const ma_float freq = BASE_FREQ * ma_powf(2.0f, diff/12.0f);
 
     return freq;
 }
-
 
 /* Main Functions */
 
@@ -177,28 +174,32 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             case SET_WAVE: {
                 ma_waveform_type waveform;
 
-                if (waveform_from_ma_uint8(event.value, &waveform) != 0) {
+                if (waveform_from_ma_uint8(event.value, &waveform) != 0){
+                    printf("*error* failed to convert uint8 to waveform");
                     break;
                 }
 
-                ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)waveform);
+                ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)event.value);
+
                 break;
             }
 
             case NOTE_PRESSED: {
-                const float frequency = frequency_from_midi_note(event.value);
-
-                ma_atomic_uint32_set(&g_state.active_note, (ma_uint32)event.value);
-                ma_atomic_float_set(&g_state.note_frequency, frequency);
-                ma_atomic_uint32_set(&g_state.note_active, 1);
+                ma_atomic_uint32_set(&g_state.note, (ma_uint32)event.value);
+                ma_atomic_uint32_set(&g_state.note_is_active, 1);
                 break;
             }
 
             case NOTE_RELEASED: {
-                const ma_uint32 active_note = ma_atomic_uint32_get(&g_state.active_note);
+                const ma_uint32 active_note = ma_atomic_uint32_get(&g_state.note);
 
                 if ((ma_uint32)event.value == active_note)
-                    ma_atomic_uint32_set(&g_state.note_active, 0);
+                    ma_atomic_uint32_set(&g_state.note_is_active, 0);
+                break;
+            }
+
+            default: {
+                printf("event not currently implemented");
                 break;
             }
         }
@@ -206,12 +207,14 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
 
     {
         const ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
-        const float frequency = ma_atomic_float_get(&g_state.note_frequency);
-        const ma_uint32 note_active = ma_atomic_uint32_get(&g_state.note_active);
+        const ma_float note = (ma_float)ma_atomic_uint32_get(&g_state.note);
+        const ma_float note_is_active = ma_atomic_uint32_get(&g_state.note_is_active);
+        const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
+        const ma_float frequency = frequency_from_midi_note(note + offset);
 
         ma_waveform_set_type(&g_wave, waveform);
         ma_waveform_set_frequency(&g_wave, frequency);
-        ma_waveform_set_amplitude(&g_wave, note_active ? BASE_AMP : 0.0f);
+        ma_waveform_set_amplitude(&g_wave, note_is_active ? BASE_AMP : 0.0f);
     }
 
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
@@ -232,11 +235,9 @@ int main(void) {
     ma_atomic_float_set(&g_state.lfo_depth, 0.0f);
     ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF);
     ma_atomic_float_set(&g_state.hpf_cutoff, HPF_CUTOFF);
-    ma_atomic_uint32_set(&g_state.octave_offset, 0);
     ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
-    ma_atomic_uint32_set(&g_state.note_active, 0);
-    ma_atomic_uint32_set(&g_state.active_note, 0);
-    ma_atomic_float_set(&g_state.note_frequency, BASE_FREQ);
+    ma_atomic_uint32_set(&g_state.note_is_active, 0);
+    ma_atomic_uint32_set(&g_state.note, 0);
 
   /* Node Graph */
     {
@@ -345,8 +346,8 @@ int main(void) {
 
         // test to see that it is reading the buf and executing the rpcs
         {
-            Event on = { NOTE_PRESSED, 69 };   /* A4 */
-            Event off = { NOTE_RELEASED, 69 }; /* release same note */
+            Event on = { NOTE_PRESSED, BASE_NOTE };   /* A4 */
+            Event off = { NOTE_RELEASED, BASE_NOTE }; /* release same note */
 
             if (!push_event(&on)) {
                 printf("*error* failed to push NOTE_PRESSED event.\n");
