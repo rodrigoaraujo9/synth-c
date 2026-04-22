@@ -36,6 +36,8 @@
 #define BASE_TYPE ma_waveform_type_sawtooth
 
 // Input Bounds
+#define NOTE_MAX 128
+
 #define PITCH_OFFSET_MAX 2.0f
 #define PITCH_OFFSET_MIN -2.0f
 
@@ -278,7 +280,7 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             }
 
             case NOTE_PRESSED: {
-                if (event.value > 128) {
+                if (event.value > NOTE_MAX) {
                     printf("*error* incorrect note value");
                     break;
                 }
