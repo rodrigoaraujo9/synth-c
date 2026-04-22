@@ -35,6 +35,22 @@
 #define BASE_NOTE 69 // A4
 #define BASE_TYPE ma_waveform_type_sawtooth
 
+// Input Bounds
+#define PITCH_OFFSET_MAX 2.0f
+#define PITCH_OFFSET_MIN -2.0f
+
+#define LFO_FREQUENCY_MAX 20.0f
+#define LFO_FREQUENCY_MIN 0.5f
+
+#define LFO_DEPTH_MAX 1.0f
+#define LFO_DEPTH_MIN 0.0f
+
+#define LPF_CUTOFF_MAX 18000.0f
+#define LPF_CUTOFF_MIN 20.0f
+
+#define HPF_CUTOFF_MAX 4000.0f
+#define HPF_CUTOFF_MIN 20.0f
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Types */
@@ -59,6 +75,11 @@ typedef enum {
     SET_WAVE,
     NOTE_PRESSED,
     NOTE_RELEASED,
+    SET_PITCH_OFFSET,
+    SET_LFO_FREQUENCY,
+    SET_LFO_DEPTH,
+    SET_LPF_CUTOFF,
+    SET_HPF_CUTOFF
 } Type;
 
 typedef struct {
@@ -67,7 +88,7 @@ typedef struct {
     // for SET_WAVE directly represents wave selected
     // for NOTE_PRESSED represents MIDI value associated with given note played -> consult table
     // for NOTE_RELEASED also represents MIDI value, of the note we want to stop playing
-    ma_uint8 value;
+    ma_uint32 value;
 } Event;
 
 /* ------------------------------------------------------------------------------------------------------------- */
@@ -127,7 +148,28 @@ int pop_event(Event *event) {
     return ma_rb_commit_read(&g_eventBuf, sizeof(*event)) == MA_SUCCESS;
 }
 
-int waveform_from_ma_uint8(ma_uint8 value, ma_waveform_type *waveform) {
+ma_int32 event_value_as_int32(ma_uint32 raw) {
+    return (ma_int32)raw;
+}
+
+ma_float event_value_as_float(ma_uint32 raw) {
+    ma_float value = 0.0f;
+    memcpy(&value, &raw, sizeof(value));
+    return value;
+}
+
+ma_float frequency_from_midi_note(ma_float note) {
+    // c[-1] = 0
+    // a[4]  = 69
+    // to freq consider base -> 440 (a[4])
+    // do the math with distance from a[4]
+    const ma_float diff = note - BASE_NOTE;
+    const ma_float freq = BASE_FREQ * ma_powf(2.0f, diff/12.0f);
+
+    return freq;
+}
+
+int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
     if (waveform == NULL) {
         return -1;
     }
@@ -150,16 +192,6 @@ int waveform_from_ma_uint8(ma_uint8 value, ma_waveform_type *waveform) {
     }
 }
 
-ma_float frequency_from_midi_note(ma_float note) {
-    // c[-1] = 0
-    // a[4]  = 69
-    // to freq consider base -> 440 (a[4])
-    // do the math with distance from a[4]
-    const ma_float diff = note - BASE_NOTE;
-    const ma_float freq = BASE_FREQ * ma_powf(2.0f, diff/12.0f);
-
-    return freq;
-}
 
 /* Main Functions */
 
@@ -170,22 +202,88 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
     MA_ASSERT(pDevice->playback.channels == CHANNELS);
 
     while (pop_event(&event)) {
+        // right now they are operating with direct values
+        // later maybe also responsible for transformation of raw arduino values
         switch (event.type) {
             case SET_WAVE: {
                 ma_waveform_type waveform;
 
-                if (waveform_from_ma_uint8(event.value, &waveform) != 0){
-                    printf("*error* failed to convert uint8 to waveform");
+                if (waveform_from_ma_uint32(event.value, &waveform) != 0){
+                    printf("*error* failed to convert uint32 to waveform");
                     break;
                 }
 
-                ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)event.value);
+                ma_atomic_uint32_set(&g_state.waveform, event.value);
+                break;
+            }
 
+            case SET_PITCH_OFFSET: {
+                ma_float offset = event_value_as_float(event.value);
+
+                if (offset > PITCH_OFFSET_MAX || offset < PITCH_OFFSET_MIN) {
+                    printf("*error* out of bounds pitch offset value on SET_PITCH_OFFSET event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.pitch_offset, offset);
+                break;
+            }
+
+            case SET_LFO_FREQUENCY: {
+                ma_float lfo_freq = event_value_as_float(event.value);
+
+                if (lfo_freq > LFO_FREQUENCY_MAX || lfo_freq < LFO_FREQUENCY_MIN) {
+                    printf("*error* out of bounds LFO frequency value on SET_LFO_FREQUENCY event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.lfo_frequency, lfo_freq);
+                break;
+            }
+
+            case SET_LFO_DEPTH: {
+                ma_float lfo_depth = event_value_as_float(event.value);
+
+                if (lfo_depth > LFO_DEPTH_MAX || lfo_depth < LFO_DEPTH_MIN) {
+                    printf("*error* out of bounds LFO depth value on SET_LFO_DEPTH event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.lfo_depth, lfo_depth);
+                break;
+            }
+
+            case SET_LPF_CUTOFF: {
+                ma_float cutoff = event_value_as_float(event.value);
+
+                if (cutoff > LPF_CUTOFF_MAX || cutoff < LPF_CUTOFF_MIN) {
+                    printf("*error* out of bounds LPF cutoff value on SET_LPF_CUTOFF event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.lpf_cutoff, cutoff);
+                break;
+            }
+
+            case SET_HPF_CUTOFF: {
+                ma_float cutoff = event_value_as_float(event.value);
+
+                if (cutoff > HPF_CUTOFF_MAX || cutoff < HPF_CUTOFF_MIN) {
+                    printf("*error* out of bounds HPF cutoff value on SET_HPF_CUTOFF event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.hpf_cutoff, cutoff);
                 break;
             }
 
             case NOTE_PRESSED: {
-                ma_atomic_uint32_set(&g_state.note, (ma_uint32)event.value);
+                if (event.value > 128) {
+                    printf("*error* incorrect note value");
+                    break;
+                }
+
+                ma_atomic_uint32_set(&g_state.note, event.value);
                 ma_atomic_uint32_set(&g_state.note_is_active, 1);
                 break;
             }
@@ -193,8 +291,9 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             case NOTE_RELEASED: {
                 const ma_uint32 active_note = ma_atomic_uint32_get(&g_state.note);
 
-                if ((ma_uint32)event.value == active_note)
+                if (event.value == active_note){
                     ma_atomic_uint32_set(&g_state.note_is_active, 0);
+                }
                 break;
             }
 
@@ -215,6 +314,8 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
         ma_waveform_set_type(&g_wave, waveform);
         ma_waveform_set_frequency(&g_wave, frequency);
         ma_waveform_set_amplitude(&g_wave, note_is_active ? BASE_AMP : 0.0f);
+
+        // since lfo is missing updates for lfo are missing too
     }
 
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
