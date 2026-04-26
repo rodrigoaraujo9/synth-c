@@ -1,3 +1,6 @@
+//! Base for this implementation was:
+//! https://miniaud.io/docs/examples/node_graph.html
+
 #define MINIAUDIO_IMPLEMENTATION
 #include "lib/miniaudio.h"
 #include <pthread.h>
@@ -449,8 +452,8 @@ int main(void) {
 
         // test to see that it is reading the buf and executing the rpcs
         {
-            Event on = { NOTE_PRESSED, BASE_NOTE };   /* A4 */
-            Event off = { NOTE_RELEASED, BASE_NOTE }; /* release same note */
+            Event on = { NOTE_PRESSED, BASE_NOTE };   // A4
+            Event off = { NOTE_RELEASED, BASE_NOTE }; // release same note
 
             if (!push_event(&on)) {
                 printf("*error* failed to push NOTE_PRESSED event.\n");
