@@ -1,67 +1,39 @@
 package com.example.android;
 
+import android.net.Uri;
 import android.os.Bundle;
-import android.view.View;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.TextView;
 
-import androidx.activity.EdgeToEdge;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
-
-import java.io.IOException;
-import java.net.SocketException;
-import java.net.UnknownHostException;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.Scanner;
+import androidx.media3.common.MediaItem;
+import androidx.media3.exoplayer.ExoPlayer;
 
 public class MainActivity extends AppCompatActivity {
 
-    EditText textInput;
-    Button sendButton;
-
-    TextView outputView;
-
-    Client client;
+    private ExoPlayer player;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
 
-        textInput = (EditText) findViewById(R.id.inputText);
-        sendButton = (Button) findViewById(R.id.sendButton);
-        outputView = (TextView) findViewById(R.id.textView);
+        player = new ExoPlayer.Builder(this).build();
 
-        try {
-            client = new Client(4000);
-        } catch (SocketException | UnknownHostException e) {
-            throw new RuntimeException(e);
-        }
+        String streamUrl = "udp://10.0.2.2:3000";
+
+        MediaItem mediaItem = MediaItem.fromUri(
+                Uri.parse(streamUrl)
+        );
+
+        player.setMediaItem(mediaItem);
+        player.prepare();
+        player.play();
     }
 
-    public void sendReceiveMessage(View view) {
-        new Thread (() -> {
-            String input = textInput.getText().toString();
-            client.buffer = input.getBytes(StandardCharsets.UTF_8);
-
-            try {
-                client.sendPacket();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-
-            byte[] packet = null;
-            try {
-            packet = client.receivePacket();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            outputView.setText(new String(packet, StandardCharsets.UTF_8));
-        }).start();
+    @Override
+    protected void onDestroy() {
+        if (player != null) {
+            player.release();
+        }
+        super.onDestroy();
     }
 }
