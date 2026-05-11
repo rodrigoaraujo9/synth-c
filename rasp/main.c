@@ -95,6 +95,12 @@ typedef struct {
     ma_uint32 value;
 } Event;
 
+typedef struct {
+    ma_node_base base;
+    ma_float phase;
+    ma_float sample_rate;
+} lfo_node;
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Globals */
@@ -107,11 +113,58 @@ static ma_node_graph g_nodeGraph;
 static ma_lpf_node g_lpfNode;
 static ma_hpf_node g_hpfNode;
 static ma_splitter_node g_splitterNode;
+static lfo_node g_lfoNode;
 static ma_data_source_node g_waveNode;
-static ma_float g_lfo_phase;
 
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Node Graph */
+
+static void tremolo_node_process_pcm_frames(
+    ma_node* pNode,
+    const float** ppFramesIn,
+    ma_uint32* pFrameCountIn,
+    float** ppFramesOut,
+    ma_uint32* pFrameCountOut
+) {
+    lfo_node* lfo = (lfo_node*)pNode;
+
+    const float* in = ppFramesIn[0];
+    float* out = ppFramesOut[0];
+
+    ma_uint32 framesToProcess = *pFrameCountOut;
+
+    ma_float lfo_frequency = ma_atomic_float_get(&g_state.lfo_frequency);
+    ma_float lfo_depth = ma_atomic_float_get(&g_state.lfo_depth);
+
+    for (ma_uint32 i = 0; i < framesToProcess; i++) {
+        ma_float gain = (1.0f - lfo_depth) + (lfo_depth * ((1.0f + ma_sinf(2.0f * MA_PI * lfo->phase)) * 0.5f));
+        for (ma_uint32 c = 0; c < CHANNELS; c++) {
+            out[i * CHANNELS + c] = in[i * CHANNELS + c] * gain;
+        }
+
+        lfo->phase += lfo_frequency / lfo->sample_rate;
+
+        while (lfo->phase >= 1.0f) {
+            lfo->phase -= 1.0f;
+        }
+    }
+
+    *pFrameCountIn = framesToProcess;
+    *pFrameCountOut = framesToProcess;
+}
+
+static ma_node_vtable g_tremoloNodeVTable = {
+    tremolo_node_process_pcm_frames,
+    NULL,
+    1,
+    1,
+    0
+};
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -197,19 +250,6 @@ int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
     }
 }
 
-/// Updates LFO phase and returns amplitude multiplier for current phase
-ma_float lfo_step(ma_float frequency, ma_float depth, ma_uint32 frameCount) {
-    ma_float value = (1.0f - depth) + (depth * ((1.0f + ma_sinf(2.0f * MA_PI * g_lfo_phase)) / 2.0f));
-
-    g_lfo_phase += frequency * ((ma_float)frameCount / (ma_float)SAMPLE_RATE);
-
-    while (g_lfo_phase >= 1.0f) {
-        g_lfo_phase -= 1.0f;
-    }
-
-    return value;
-}
-
 /* Main Functions */
 
 // backend runs this funct on repeat
@@ -219,8 +259,6 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
     MA_ASSERT(pDevice->playback.channels == CHANNELS);
 
     while (pop_event(&event)) {
-        // right now they are operating with direct values
-        // later maybe also responsible for transformation of raw arduino values
         switch (event.type) {
             case SET_WAVE: {
                 ma_waveform_type waveform;
@@ -327,14 +365,10 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
         const ma_float note_is_active = ma_atomic_uint32_get(&g_state.note_is_active);
         const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
         const ma_float frequency = frequency_from_midi_note(note + offset);
-        const ma_float lfo_freq = ma_atomic_float_get(&g_state.lfo_frequency);
-        const ma_float lfo_depth = ma_atomic_float_get(&g_state.lfo_depth);
-
-        ma_float lfo_gain = lfo_step(lfo_freq, lfo_depth, frameCount);
 
         ma_waveform_set_type(&g_wave, waveform);
         ma_waveform_set_frequency(&g_wave, frequency);
-        ma_waveform_set_amplitude(&g_wave, note_is_active ? BASE_AMP * lfo_gain : 0.0f);
+        ma_waveform_set_amplitude(&g_wave, note_is_active ? BASE_AMP : 0.0f);
     }
 
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
@@ -359,7 +393,6 @@ int main(void) {
     ma_atomic_uint32_set(&g_state.note_is_active, 0);
     ma_atomic_uint32_set(&g_state.note, 0);
 
-    g_lfo_phase = 0.0f;
 
   /* Node Graph */
     {
@@ -414,6 +447,28 @@ int main(void) {
         ma_node_attach_output_bus(&g_splitterNode, 1, &g_hpfNode, 0);
     }
 
+    /* LFO Node */
+    {
+        ma_uint32 inputChannels[1] = { CHANNELS };
+        ma_uint32 outputChannels[1] = { CHANNELS };
+
+        ma_node_config tremoloConfig = ma_node_config_init();
+        tremoloConfig.vtable = &g_tremoloNodeVTable;
+        tremoloConfig.pInputChannels = inputChannels;
+        tremoloConfig.pOutputChannels = outputChannels;
+
+        result = ma_node_init(&g_nodeGraph, &tremoloConfig, NULL, &g_lfoNode.base);
+        if (result != MA_SUCCESS) {
+            printf("*error* failed to initialize tremolo node.\n");
+            goto cleanup_splitter;
+        }
+
+        g_lfoNode.phase = 0.0f;
+        g_lfoNode.sample_rate = SAMPLE_RATE;
+
+        ma_node_attach_output_bus(&g_lfoNode, 0, &g_splitterNode, 0);
+    }
+
   /* Wave */
     {
         ma_waveform_config waveConfig = ma_waveform_config_init(FORMAT, CHANNELS, SAMPLE_RATE, BASE_TYPE, BASE_AMP, BASE_FREQ);
@@ -421,7 +476,7 @@ int main(void) {
         result = ma_waveform_init(&waveConfig, &g_wave);
         if (result != MA_SUCCESS) {
             printf("*error* failed to initialize wave waveform.\n");
-            goto cleanup_splitter;
+            goto cleanup_lfo;
         }
     }
 
@@ -435,7 +490,7 @@ int main(void) {
             goto cleanup_splitter;
         }
 
-        ma_node_attach_output_bus(&g_waveNode, 0, &g_splitterNode, 0);
+        ma_node_attach_output_bus(&g_waveNode, 0, &g_lfoNode, 0);
     }
 
   /* Playback Device */
@@ -499,6 +554,8 @@ int main(void) {
 
   cleanup_wave:
     ma_data_source_node_uninit(&g_waveNode, NULL);
+  cleanup_lfo:
+    ma_node_uninit(&g_lfoNode, NULL);
   cleanup_splitter:
     ma_splitter_node_uninit(&g_splitterNode, NULL);
   cleanup_hpf:
