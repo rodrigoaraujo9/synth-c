@@ -60,7 +60,6 @@
 
 /* Types */
 
-// uses thread safe datastructures provided by miniaudio (STILL UNUSED)
 typedef struct {
     ma_atomic_uint32   waveform;       // [0..4] will be mapped to ma_waveform_type
 
@@ -109,6 +108,7 @@ static ma_lpf_node g_lpfNode;
 static ma_hpf_node g_hpfNode;
 static ma_splitter_node g_splitterNode;
 static ma_data_source_node g_waveNode;
+static ma_float g_lfo_phase;
 
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
@@ -197,6 +197,18 @@ int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
     }
 }
 
+/// Updates LFO phase and returns amplitude multiplier for current phase
+ma_float lfo_step(ma_float frequency, ma_float depth, ma_uint32 frameCount) {
+    ma_float value = (1.0f - depth) + (depth * ((1.0f + ma_sinf(2.0f * MA_PI * g_lfo_phase)) / 2.0f));
+
+    g_lfo_phase += frequency * ((ma_float)frameCount / (ma_float)SAMPLE_RATE);
+
+    while (g_lfo_phase >= 1.0f) {
+        g_lfo_phase -= 1.0f;
+    }
+
+    return value;
+}
 
 /* Main Functions */
 
@@ -315,12 +327,14 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
         const ma_float note_is_active = ma_atomic_uint32_get(&g_state.note_is_active);
         const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
         const ma_float frequency = frequency_from_midi_note(note + offset);
+        const ma_float lfo_freq = ma_atomic_float_get(&g_state.lfo_frequency);
+        const ma_float lfo_depth = ma_atomic_float_get(&g_state.lfo_depth);
+
+        ma_float lfo_gain = lfo_step(lfo_freq, lfo_depth, frameCount);
 
         ma_waveform_set_type(&g_wave, waveform);
         ma_waveform_set_frequency(&g_wave, frequency);
-        ma_waveform_set_amplitude(&g_wave, note_is_active ? BASE_AMP : 0.0f);
-
-        // since lfo is missing updates for lfo are missing too
+        ma_waveform_set_amplitude(&g_wave, note_is_active ? BASE_AMP * lfo_gain : 0.0f);
     }
 
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
@@ -337,13 +351,15 @@ int main(void) {
     }
 
     ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)BASE_TYPE);
-    ma_atomic_float_set(&g_state.lfo_frequency, 0.0f);
-    ma_atomic_float_set(&g_state.lfo_depth, 0.0f);
+    ma_atomic_float_set(&g_state.lfo_frequency, 10.0f);
+    ma_atomic_float_set(&g_state.lfo_depth, 1.0f);
     ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF);
     ma_atomic_float_set(&g_state.hpf_cutoff, HPF_CUTOFF);
     ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
     ma_atomic_uint32_set(&g_state.note_is_active, 0);
     ma_atomic_uint32_set(&g_state.note, 0);
+
+    g_lfo_phase = 0.0f;
 
   /* Node Graph */
     {
