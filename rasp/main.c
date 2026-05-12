@@ -24,8 +24,8 @@
 
 
 // Effect Properties
-#define LPF_BIAS 0.5f              // higher values make the low-pass filter more audible. Must be between 0 and 1.
-#define LPF_CUTOFF 100.0f          // the lower the more evident
+#define LPF_BIAS 0.0f              // higher values make the low-pass filter more audible. Must be between 0 and 1.
+#define LPF_CUTOFF 10000.0f          // the lower the more evident
 #define LPF_ORDER 8                // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
 
 #define HPF_BIAS (1.0f - LPF_BIAS) // inverse to lpf bias for now
@@ -206,6 +206,12 @@ int pop_event(Event *event) {
     return ma_rb_commit_read(&g_eventBuf, sizeof(*event)) == MA_SUCCESS;
 }
 
+ma_uint32 float_as_event_value(ma_float value) {
+    ma_uint32 raw = 0;
+    memcpy(&raw, &value, sizeof(value));
+    return raw;
+}
+
 ma_int32 event_value_as_int32(ma_uint32 raw) {
     return (ma_int32)raw;
 }
@@ -317,6 +323,17 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                 }
 
                 ma_atomic_float_set(&g_state.lpf_cutoff, cutoff);
+
+                ma_lpf_config lpfConfig = ma_lpf_config_init(
+                    FORMAT,
+                    CHANNELS,
+                    SAMPLE_RATE,
+                    cutoff,
+                    LPF_ORDER
+                );
+
+                ma_lpf_node_reinit(&lpfConfig, &g_lpfNode);
+
                 break;
             }
 
@@ -329,6 +346,16 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                 }
 
                 ma_atomic_float_set(&g_state.hpf_cutoff, cutoff);
+
+                ma_hpf_config hpfConfig = ma_hpf_config_init(
+                    FORMAT,
+                    CHANNELS,
+                    SAMPLE_RATE,
+                    cutoff,
+                    HPF_ORDER
+                );
+
+                ma_hpf_node_reinit(&hpfConfig, &g_hpfNode);
                 break;
             }
 
@@ -523,22 +550,33 @@ int main(void) {
 
         // test to see that it is reading the buf and executing the rpcs
         {
-            Event on = { NOTE_PRESSED, BASE_NOTE };   // A4
-            Event off = { NOTE_RELEASED, BASE_NOTE }; // release same note
+            Event on1 = { NOTE_PRESSED, 75 };
+            Event on2 = { NOTE_PRESSED, 72 };
+            Event lfo_freq = { SET_LFO_FREQUENCY, float_as_event_value(2.0f) };
+            Event lfo_depth = { SET_LFO_DEPTH, float_as_event_value(0.2f) };
+            Event lpf = { SET_HPF_CUTOFF, float_as_event_value(1000.0f) };
+            Event off1 = { NOTE_RELEASED, 75 };
+            Event off2 = { NOTE_RELEASED, 72 };
 
-            if (!push_event(&on)) {
-                printf("*error* failed to push NOTE_PRESSED event.\n");
-            } else {
-                printf("*info* NOTE_PRESSED sent.\n");
-            }
-
+            push_event(&on1);
+            sleep(2);
+            push_event(&on2);
             sleep(2);
 
-            if (!push_event(&off)) {
-                printf("*error* failed to push NOTE_RELEASED event.\n");
-            } else {
-                printf("*info* NOTE_RELEASED sent.\n");
-            }
+
+            push_event(&lfo_freq);
+            printf("*info* SET_LFO_FREQUENCY sent.\n");
+            sleep(2);
+
+            push_event(&lfo_depth);
+            printf("*info* SET_LFO_DEPTH sent.\n");
+            sleep(2);
+
+            push_event(&lpf);
+            printf("*info* SET_LPF_CUTOFF sent.\n");
+            sleep(2);
+
+            push_event(&off2);
         }
 
     #ifdef __EMSCRIPTEN__
