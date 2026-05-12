@@ -24,11 +24,9 @@
 
 
 // Effect Properties
-#define LPF_BIAS 0.0f              // higher values make the low-pass filter more audible. Must be between 0 and 1.
-#define LPF_CUTOFF 10000.0f          // the lower the more evident
+#define LPF_CUTOFF 10000.0f        // the lower the more evident
 #define LPF_ORDER 8                // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
 
-#define HPF_BIAS (1.0f - LPF_BIAS) // inverse to lpf bias for now
 #define HPF_CUTOFF 300.0f          // the higher the more evident
 #define HPF_ORDER 8
 
@@ -112,7 +110,6 @@ static ma_waveform g_wave;
 static ma_node_graph g_nodeGraph;
 static ma_lpf_node g_lpfNode;
 static ma_hpf_node g_hpfNode;
-static ma_splitter_node g_splitterNode;
 static lfo_node g_lfoNode;
 static ma_data_source_node g_waveNode;
 
@@ -254,6 +251,17 @@ int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
         default:
             return -1;
     }
+}
+
+void play_note(ma_uint32 note_value, useconds_t on_time, useconds_t off_time) {
+    Event on = { NOTE_PRESSED, note_value };
+    Event off = { NOTE_RELEASED, note_value };
+
+    push_event(&on);
+    usleep(on_time);
+
+    push_event(&off);
+    usleep(off_time);
 }
 
 /* Main Functions */
@@ -443,7 +451,6 @@ int main(void) {
         }
 
         ma_node_attach_output_bus(&g_lpfNode, 0, ma_node_graph_get_endpoint(&g_nodeGraph), 0);
-        ma_node_set_output_bus_volume(&g_lpfNode, 0, LPF_BIAS);
     }
 
   /* High Pass Filter */
@@ -456,22 +463,7 @@ int main(void) {
             goto cleanup_lpf;
         }
 
-        ma_node_attach_output_bus(&g_hpfNode, 0, ma_node_graph_get_endpoint(&g_nodeGraph), 0);
-        ma_node_set_output_bus_volume(&g_hpfNode, 0, HPF_BIAS);
-    }
-
-  /* Splitter */
-    {
-        ma_splitter_node_config splitterNodeConfig = ma_splitter_node_config_init(CHANNELS);
-
-        result = ma_splitter_node_init(&g_nodeGraph, &splitterNodeConfig, NULL, &g_splitterNode);
-        if (result != MA_SUCCESS) {
-            printf("*error* failed to initialize splitter node.\n");
-            goto cleanup_hpf;
-        }
-
-        ma_node_attach_output_bus(&g_splitterNode, 0, &g_lpfNode, 0);
-        ma_node_attach_output_bus(&g_splitterNode, 1, &g_hpfNode, 0);
+        ma_node_attach_output_bus(&g_hpfNode, 0, &g_lpfNode, 0);
     }
 
     /* LFO Node */
@@ -487,13 +479,13 @@ int main(void) {
         result = ma_node_init(&g_nodeGraph, &tremoloConfig, NULL, &g_lfoNode.base);
         if (result != MA_SUCCESS) {
             printf("*error* failed to initialize tremolo node.\n");
-            goto cleanup_splitter;
+            goto cleanup_hpf;
         }
 
         g_lfoNode.phase = 0.0f;
         g_lfoNode.sample_rate = SAMPLE_RATE;
 
-        ma_node_attach_output_bus(&g_lfoNode, 0, &g_splitterNode, 0);
+        ma_node_attach_output_bus(&g_lfoNode, 0, &g_hpfNode, 0);
     }
 
   /* Wave */
@@ -514,7 +506,7 @@ int main(void) {
         result = ma_data_source_node_init(&g_nodeGraph, &waveNodeConfig, NULL, &g_waveNode);
         if (result != MA_SUCCESS) {
             printf("*error* failed to initialize wave node.\n");
-            goto cleanup_splitter;
+            goto cleanup_lfo;
         }
 
         ma_node_attach_output_bus(&g_waveNode, 0, &g_lfoNode, 0);
@@ -548,35 +540,30 @@ int main(void) {
             goto cleanup_wave;
         }
 
-        // test to see that it is reading the buf and executing the rpcs
+        // IT's ME MARIO!
         {
-            Event on1 = { NOTE_PRESSED, 75 };
-            Event on2 = { NOTE_PRESSED, 72 };
-            Event lfo_freq = { SET_LFO_FREQUENCY, float_as_event_value(2.0f) };
-            Event lfo_depth = { SET_LFO_DEPTH, float_as_event_value(0.2f) };
-            Event lpf = { SET_HPF_CUTOFF, float_as_event_value(1000.0f) };
-            Event off1 = { NOTE_RELEASED, 75 };
-            Event off2 = { NOTE_RELEASED, 72 };
+            Event wave = { SET_WAVE, 3 };
+            Event lfo_freq = { SET_LFO_FREQUENCY, float_as_event_value(6.0f) };
+            Event lfo_depth = { SET_LFO_DEPTH, float_as_event_value(0.08f) };
+            Event hpf = { SET_HPF_CUTOFF, float_as_event_value(200.0f) };
+            Event lpf = { SET_LPF_CUTOFF, float_as_event_value(3500.0f) };
 
-            push_event(&on1);
-            sleep(2);
-            push_event(&on2);
-            sleep(2);
-
-
+            push_event(&wave);
             push_event(&lfo_freq);
-            printf("*info* SET_LFO_FREQUENCY sent.\n");
-            sleep(2);
-
             push_event(&lfo_depth);
-            printf("*info* SET_LFO_DEPTH sent.\n");
-            sleep(2);
-
+            push_event(&hpf);
             push_event(&lpf);
-            printf("*info* SET_LPF_CUTOFF sent.\n");
-            sleep(2);
 
-            push_event(&off2);
+            play_note(76, 120000, 60000);
+            play_note(76, 120000, 60000);
+            usleep(120000);
+            play_note(76, 120000, 60000);
+            usleep(120000);
+            play_note(72, 120000, 60000);
+            play_note(76, 120000, 60000);
+            usleep(120000);
+            play_note(79, 180000, 220000);
+            play_note(67, 180000, 1800000);
         }
 
     #ifdef __EMSCRIPTEN__
@@ -594,8 +581,6 @@ int main(void) {
     ma_data_source_node_uninit(&g_waveNode, NULL);
   cleanup_lfo:
     ma_node_uninit(&g_lfoNode, NULL);
-  cleanup_splitter:
-    ma_splitter_node_uninit(&g_splitterNode, NULL);
   cleanup_hpf:
     ma_hpf_node_uninit(&g_hpfNode, NULL);
   cleanup_lpf:
