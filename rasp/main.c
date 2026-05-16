@@ -108,63 +108,16 @@ typedef struct {
 
 static State g_state;
 
-static ma_waveform g_wave;
+static ma_waveform g_waves[MAX_NOTES];
 
 static ma_node_graph g_nodeGraph;
 static ma_lpf_node g_lpfNode;
 static ma_hpf_node g_hpfNode;
 static Lfo g_lfoNode;
-static ma_data_source_node g_waveNode;
+static ma_node_base g_polyNode;
 
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
-
-
-/* ------------------------------------------------------------------------------------------------------------- */
-
-/* Node Graph */
-
-static void tremolo_node_process_pcm_frames(
-    ma_node* pNode,
-    const float** ppFramesIn,
-    ma_uint32* pFrameCountIn,
-    float** ppFramesOut,
-    ma_uint32* pFrameCountOut
-) {
-    Lfo* lfo = (Lfo*)pNode;
-
-    const float* in = ppFramesIn[0];
-    float* out = ppFramesOut[0];
-
-    ma_uint32 framesToProcess = *pFrameCountOut;
-
-    ma_float lfo_frequency = ma_atomic_float_get(&g_state.lfo_frequency);
-    ma_float lfo_depth = ma_atomic_float_get(&g_state.lfo_depth);
-
-    for (ma_uint32 i = 0; i < framesToProcess; i++) {
-        ma_float gain = (1.0f - lfo_depth) + (lfo_depth * ((1.0f + ma_sinf(2.0f * MA_PI * lfo->phase)) * 0.5f));
-        for (ma_uint32 c = 0; c < CHANNELS; c++) {
-            out[i * CHANNELS + c] = in[i * CHANNELS + c] * gain;
-        }
-
-        lfo->phase += lfo_frequency / lfo->sample_rate;
-
-        while (lfo->phase >= 1.0f) {
-            lfo->phase -= 1.0f;
-        }
-    }
-
-    *pFrameCountIn = framesToProcess;
-    *pFrameCountOut = framesToProcess;
-}
-
-static ma_node_vtable g_tremoloNodeVTable = {
-    tremolo_node_process_pcm_frames,
-    NULL,
-    1,
-    1,
-    0
-};
 
 
 /* ------------------------------------------------------------------------------------------------------------- */
@@ -279,6 +232,118 @@ void play_note(ma_uint32 note_value, useconds_t on_time, useconds_t off_time) {
     push_event(&off);
     usleep(off_time);
 }
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Node Graph */
+
+static void poly_node_process_pcm_frames(
+    ma_node* pNode,
+    const float** ppFramesIn,
+    ma_uint32* pFrameCountIn,
+    float** ppFramesOut,
+    ma_uint32* pFrameCountOut
+) {
+    (void)pNode;
+    (void)ppFramesIn;
+    (void)pFrameCountIn;
+
+    float* out = ppFramesOut[0];
+    ma_uint32 framesToProcess = *pFrameCountOut;
+
+    memset(out, 0, framesToProcess * CHANNELS * sizeof(float));
+
+    const ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
+
+    const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
+
+    ma_uint32 active_count = 0;
+
+    for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
+        if (ma_atomic_uint32_get(&g_state.keys[note]) != 0) {
+            active_count++;
+        }
+    }
+
+    if (active_count == 0) {
+        *pFrameCountOut = framesToProcess;
+        return;
+    }
+
+    const ma_float amp = BASE_AMP / (ma_float)active_count;
+
+    for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
+        if (ma_atomic_uint32_get(&g_state.keys[note]) == 0) {
+            continue;
+        }
+
+        ma_waveform_set_type(&g_waves[note], waveform);
+        ma_waveform_set_frequency(&g_waves[note], frequency_from_midi_note((ma_float)note + offset));
+        ma_waveform_set_amplitude(&g_waves[note], amp);
+
+        for (ma_uint32 i = 0; i < framesToProcess; i++) {
+            float sample[CHANNELS];
+
+            ma_waveform_read_pcm_frames(&g_waves[note], sample, 1, NULL);
+
+            for (ma_uint32 c = 0; c < CHANNELS; c++) {
+                out[i * CHANNELS + c] += sample[c];
+            }
+        }
+    }
+
+    *pFrameCountOut = framesToProcess;
+}
+
+static ma_node_vtable g_polyNodeVTable = {
+    poly_node_process_pcm_frames,
+    NULL,
+    0,
+    1,
+    0
+};
+
+static void tremolo_node_process_pcm_frames(
+    ma_node* pNode,
+    const float** ppFramesIn,
+    ma_uint32* pFrameCountIn,
+    float** ppFramesOut,
+    ma_uint32* pFrameCountOut
+) {
+    Lfo* lfo = (Lfo*)pNode;
+
+    const float* in = ppFramesIn[0];
+    float* out = ppFramesOut[0];
+
+    ma_uint32 framesToProcess = *pFrameCountOut;
+
+    ma_float lfo_frequency = ma_atomic_float_get(&g_state.lfo_frequency);
+    ma_float lfo_depth = ma_atomic_float_get(&g_state.lfo_depth);
+
+    for (ma_uint32 i = 0; i < framesToProcess; i++) {
+        ma_float gain = (1.0f - lfo_depth) + (lfo_depth * ((1.0f + ma_sinf(2.0f * MA_PI * lfo->phase)) * 0.5f));
+        for (ma_uint32 c = 0; c < CHANNELS; c++) {
+            out[i * CHANNELS + c] = in[i * CHANNELS + c] * gain;
+        }
+
+        lfo->phase += lfo_frequency / lfo->sample_rate;
+
+        while (lfo->phase >= 1.0f) {
+            lfo->phase -= 1.0f;
+        }
+    }
+
+    *pFrameCountIn = framesToProcess;
+    *pFrameCountOut = framesToProcess;
+}
+
+static ma_node_vtable g_tremoloNodeVTable = {
+    tremolo_node_process_pcm_frames,
+    NULL,
+    1,
+    1,
+    0
+};
 
 
 /* Main Functions */
@@ -411,41 +476,6 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
         }
     }
 
-    {
-        float *out = (float *)pOutput;
-        memset(out, 0, frameCount * CHANNELS * sizeof(float));
-
-        const ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
-        const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
-
-        ma_waveform_set_type(&g_wave, waveform);
-
-        for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
-            if (ma_atomic_uint32_get(&g_state.keys[note]) == 0) {
-                continue;
-            }
-
-            ma_float temp[1024 * CHANNELS];
-
-            if (frameCount > 1024) {
-                printf("*error* frameCount too large for temp buffer\n");
-                break;
-            }
-
-            memset(temp, 0, frameCount * CHANNELS * sizeof(float));
-
-            ma_waveform_set_frequency(&g_wave, frequency_from_midi_note((ma_float)note + offset));
-            ma_waveform_set_amplitude(&g_wave, BASE_AMP);
-            ma_waveform_read_pcm_frames(&g_wave, temp, frameCount, NULL);
-
-            for (ma_uint32 i = 0; i < frameCount * CHANNELS; i++) {
-                out[i] += temp[i];
-            }
-        }
-    }
-
-    (void)pInput;
-
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
     (void)pInput;
 }
@@ -529,28 +559,41 @@ int main(void) {
         ma_node_attach_output_bus(&g_lfoNode, 0, &g_hpfNode, 0);
     }
 
-  /* Wave */
+    /* Waves */
     {
-        ma_waveform_config waveConfig = ma_waveform_config_init(FORMAT, CHANNELS, SAMPLE_RATE, BASE_TYPE, BASE_AMP, BASE_FREQ);
+        for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
+            ma_waveform_config waveConfig = ma_waveform_config_init(
+                FORMAT,
+                CHANNELS,
+                SAMPLE_RATE,
+                BASE_TYPE,
+                0.0f,
+                frequency_from_midi_note((ma_float)note)
+            );
 
-        result = ma_waveform_init(&waveConfig, &g_wave);
-        if (result != MA_SUCCESS) {
-            printf("*error* failed to initialize wave waveform.\n");
-            goto cleanup_lfo;
+            result = ma_waveform_init(&waveConfig, &g_waves[note]);
+            if (result != MA_SUCCESS) {
+                printf("*error* failed to initialize wave waveform.\n");
+                goto cleanup_lfo;
+            }
         }
     }
 
   /* Wrap wave as a data source node and attach it to the graph */
     {
-        ma_data_source_node_config waveNodeConfig = ma_data_source_node_config_init(&g_wave);
+        ma_uint32 outputChannels[1] = { CHANNELS };
 
-        result = ma_data_source_node_init(&g_nodeGraph, &waveNodeConfig, NULL, &g_waveNode);
+        ma_node_config polyConfig = ma_node_config_init();
+        polyConfig.vtable = &g_polyNodeVTable;
+        polyConfig.pOutputChannels = outputChannels;
+
+        result = ma_node_init(&g_nodeGraph, &polyConfig, NULL, &g_polyNode);
         if (result != MA_SUCCESS) {
             printf("*error* failed to initialize wave node.\n");
             goto cleanup_lfo;
         }
 
-        ma_node_attach_output_bus(&g_waveNode, 0, &g_lfoNode, 0);
+        ma_node_attach_output_bus(&g_polyNode, 0, &g_lfoNode, 0);
     }
 
   /* Playback Device */
@@ -581,13 +624,13 @@ int main(void) {
             goto cleanup_wave;
         }
 
-        // IT's ME MARIO!
+        /* Cool Demo */
         {
             Event wave = { SET_WAVE, 3 };
-            Event lfo_freq = { SET_LFO_FREQUENCY, float_as_event_value(6.0f) };
-            Event lfo_depth = { SET_LFO_DEPTH, float_as_event_value(0.08f) };
-            Event hpf = { SET_HPF_CUTOFF, float_as_event_value(200.0f) };
-            Event lpf = { SET_LPF_CUTOFF, float_as_event_value(3500.0f) };
+            Event lfo_freq = { SET_LFO_FREQUENCY, float_as_event_value(16.0f) };
+            Event lfo_depth = { SET_LFO_DEPTH, float_as_event_value(0.85f) };
+            Event hpf = { SET_HPF_CUTOFF, float_as_event_value(80.0f) };
+            Event lpf = { SET_LPF_CUTOFF, float_as_event_value(1800.0f) };
 
             push_event(&wave);
             push_event(&lfo_freq);
@@ -595,16 +638,43 @@ int main(void) {
             push_event(&hpf);
             push_event(&lpf);
 
-            play_note(76, 120000, 60000);
-            play_note(76, 120000, 60000);
-            usleep(120000);
-            play_note(76, 120000, 60000);
-            usleep(120000);
-            play_note(72, 120000, 60000);
-            play_note(76, 120000, 60000);
-            usleep(120000);
-            play_note(79, 180000, 220000);
-            play_note(67, 180000, 1800000);
+            Event c3_on = { NOTE_PRESSED, 48 };
+            Event e3_on = { NOTE_PRESSED, 52 };
+            Event g3_on = { NOTE_PRESSED, 55 };
+            Event b3_on = { NOTE_PRESSED, 59 };
+
+            push_event(&c3_on);
+            push_event(&e3_on);
+            push_event(&g3_on);
+            push_event(&b3_on);
+
+            for (int i = 0; i <= 100; i++) {
+                ma_float t = (ma_float)i / 100.0f;
+                ma_float freq = 16.0f + (0.5f - 16.0f) * t;
+                ma_float cutoff = 500.0f + (HPF_CUTOFF_MIN - 500.0f) * t;
+
+                Event lfo_ramp = { SET_LFO_FREQUENCY, float_as_event_value(freq) };
+                Event hpf_ramp = { SET_HPF_CUTOFF, float_as_event_value(cutoff) };
+
+                push_event(&lfo_ramp);
+                push_event(&hpf_ramp);
+
+                usleep(50000);
+            }
+
+            Event c3_off = { NOTE_RELEASED, 48 };
+            Event e3_off = { NOTE_RELEASED, 52 };
+            Event g3_off = { NOTE_RELEASED, 55 };
+            Event b3_off = { NOTE_RELEASED, 59 };
+
+            usleep(500000);
+
+            push_event(&c3_off);
+            push_event(&e3_off);
+            push_event(&g3_off);
+            push_event(&b3_off);
+
+            usleep(500000);
         }
 
     #ifdef __EMSCRIPTEN__
@@ -619,9 +689,9 @@ int main(void) {
     }
 
   cleanup_wave:
-    ma_data_source_node_uninit(&g_waveNode, NULL);
+    ma_node_uninit(&g_polyNode, NULL);
   cleanup_lfo:
-    ma_node_uninit(&g_lfoNode, NULL);
+    ma_node_uninit(&g_lfoNode.base, NULL);
   cleanup_hpf:
     ma_hpf_node_uninit(&g_hpfNode, NULL);
   cleanup_lpf:
