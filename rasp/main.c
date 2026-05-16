@@ -13,6 +13,7 @@
     void main_loop__em(void) {}
 #endif
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Config */
@@ -38,6 +39,7 @@
 
 // Input Bounds
 #define NOTE_MAX 128
+#define MAX_NOTES NOTE_MAX // like keyboard. one key per note
 
 #define PITCH_OFFSET_MAX 2.0f
 #define PITCH_OFFSET_MIN -2.0f
@@ -54,23 +56,23 @@
 #define HPF_CUTOFF_MAX 4000.0f
 #define HPF_CUTOFF_MIN 20.0f
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Types */
 
 typedef struct {
-    ma_atomic_uint32   waveform;       // [0..4] will be mapped to ma_waveform_type
+    ma_atomic_uint32   waveform;        // [0..4] will be mapped to ma_waveform_type
 
-    ma_atomic_uint32   note_is_active; // 0 or 1
-    ma_atomic_uint32   note;           // MIDI note number -> base
+    ma_atomic_uint32   keys[MAX_NOTES]; // [0..1] Active keys (mapped by note)
 
-    ma_atomic_float    pitch_offset;   // Semi-tones makes more sense for logic but less for readability
+    ma_atomic_float    pitch_offset;    // Semi-tones makes more sense for logic but less for readability
 
-    ma_atomic_float    lfo_frequency;  // Hz
-    ma_atomic_float    lfo_depth;      // [0..1]
+    ma_atomic_float    lfo_frequency;   // Hz
+    ma_atomic_float    lfo_depth;       // [0..1]
 
-    ma_atomic_float    lpf_cutoff;     // Hz
-    ma_atomic_float    hpf_cutoff;     // Hz
+    ma_atomic_float    lpf_cutoff;      // Hz
+    ma_atomic_float    hpf_cutoff;      // Hz
 } State;
 
 typedef enum {
@@ -97,7 +99,8 @@ typedef struct {
     ma_node_base base;
     ma_float phase;
     ma_float sample_rate;
-} lfo_node;
+} Lfo;
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -110,11 +113,12 @@ static ma_waveform g_wave;
 static ma_node_graph g_nodeGraph;
 static ma_lpf_node g_lpfNode;
 static ma_hpf_node g_hpfNode;
-static lfo_node g_lfoNode;
+static Lfo g_lfoNode;
 static ma_data_source_node g_waveNode;
 
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -127,7 +131,7 @@ static void tremolo_node_process_pcm_frames(
     float** ppFramesOut,
     ma_uint32* pFrameCountOut
 ) {
-    lfo_node* lfo = (lfo_node*)pNode;
+    Lfo* lfo = (Lfo*)pNode;
 
     const float* in = ppFramesIn[0];
     float* out = ppFramesOut[0];
@@ -253,6 +257,18 @@ int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
     }
 }
 
+void note_on(ma_uint32 note) {
+    if (note >= MAX_NOTES) return;
+
+    ma_atomic_uint32_set(&g_state.keys[note], 1);
+}
+
+void note_off(ma_uint32 note) {
+    if (note >= MAX_NOTES) return;
+
+    ma_atomic_uint32_set(&g_state.keys[note], 0);
+}
+
 void play_note(ma_uint32 note_value, useconds_t on_time, useconds_t off_time) {
     Event on = { NOTE_PRESSED, note_value };
     Event off = { NOTE_RELEASED, note_value };
@@ -263,6 +279,7 @@ void play_note(ma_uint32 note_value, useconds_t on_time, useconds_t off_time) {
     push_event(&off);
     usleep(off_time);
 }
+
 
 /* Main Functions */
 
@@ -368,22 +385,22 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             }
 
             case NOTE_PRESSED: {
-                if (event.value > NOTE_MAX) {
+                if (event.value >= NOTE_MAX) {
                     printf("*error* incorrect note value");
                     break;
                 }
 
-                ma_atomic_uint32_set(&g_state.note, event.value);
-                ma_atomic_uint32_set(&g_state.note_is_active, 1);
+                ma_atomic_uint32_set(&g_state.keys[event.value], 1);
                 break;
             }
 
             case NOTE_RELEASED: {
-                const ma_uint32 active_note = ma_atomic_uint32_get(&g_state.note);
-
-                if (event.value == active_note){
-                    ma_atomic_uint32_set(&g_state.note_is_active, 0);
+                if (event.value >= NOTE_MAX) {
+                    printf("*error* incorrect note value");
+                    break;
                 }
+
+                ma_atomic_uint32_set(&g_state.keys[event.value], 0);
                 break;
             }
 
@@ -395,16 +412,39 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
     }
 
     {
+        float *out = (float *)pOutput;
+        memset(out, 0, frameCount * CHANNELS * sizeof(float));
+
         const ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
-        const ma_float note = (ma_float)ma_atomic_uint32_get(&g_state.note);
-        const ma_float note_is_active = ma_atomic_uint32_get(&g_state.note_is_active);
         const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
-        const ma_float frequency = frequency_from_midi_note(note + offset);
 
         ma_waveform_set_type(&g_wave, waveform);
-        ma_waveform_set_frequency(&g_wave, frequency);
-        ma_waveform_set_amplitude(&g_wave, note_is_active ? BASE_AMP : 0.0f);
+
+        for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
+            if (ma_atomic_uint32_get(&g_state.keys[note]) == 0) {
+                continue;
+            }
+
+            ma_float temp[1024 * CHANNELS];
+
+            if (frameCount > 1024) {
+                printf("*error* frameCount too large for temp buffer\n");
+                break;
+            }
+
+            memset(temp, 0, frameCount * CHANNELS * sizeof(float));
+
+            ma_waveform_set_frequency(&g_wave, frequency_from_midi_note((ma_float)note + offset));
+            ma_waveform_set_amplitude(&g_wave, BASE_AMP);
+            ma_waveform_read_pcm_frames(&g_wave, temp, frameCount, NULL);
+
+            for (ma_uint32 i = 0; i < frameCount * CHANNELS; i++) {
+                out[i] += temp[i];
+            }
+        }
     }
+
+    (void)pInput;
 
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
     (void)pInput;
@@ -425,8 +465,9 @@ int main(void) {
     ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF);
     ma_atomic_float_set(&g_state.hpf_cutoff, HPF_CUTOFF);
     ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
-    ma_atomic_uint32_set(&g_state.note_is_active, 0);
-    ma_atomic_uint32_set(&g_state.note, 0);
+    for (int i = 0; i < MAX_NOTES; i++) {
+        ma_atomic_uint32_set(&g_state.keys[i], 0);
+    }
 
 
   /* Node Graph */
