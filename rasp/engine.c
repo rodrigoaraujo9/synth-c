@@ -702,3 +702,55 @@ int main(void) {
     ma_rb_uninit(&g_eventBuf);
     return 0;
 }
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Normalization and Update */
+
+void joystick_to_cutoff(float x) {
+    float middle = 512.0f; // adapt
+    float offset = x - middle;
+
+    Event lpf, hpf;
+
+    if (offset <= 0) {
+        // more drowned as distance form middle grows
+        ma_uint32 value = float_as_event_value(middle * LPF_CUTOFF_MAX / LPF_CUTOFF_MIN);
+        lpf = (Event){SET_LPF_CUTOFF, value};
+        hpf = (Event){SET_HPF_CUTOFF, HPF_CUTOFF_MIN};
+    } else if (offset > 0){
+        ma_uint32 value = float_as_event_value(middle * HPF_CUTOFF_MIN / HPF_CUTOFF_MAX);
+        lpf = (Event){SET_LPF_CUTOFF, LPF_CUTOFF_MAX};
+        hpf = (Event){SET_HPF_CUTOFF, value};
+    }
+    push_event(&lpf);
+    push_event(&hpf);
+}
+
+void joystick_to_pitch_offset(float y) {
+    float middle = 512.0f; // adapt
+    float offset = y - middle;
+
+    ma_uint32 value = float_as_event_value(middle * PITCH_OFFSET_MIN / PITCH_OFFSET_MAX);
+
+    Event pitch = {SET_PITCH_OFFSET, value};
+
+    push_event(&pitch);
+}
+
+Event ultrassonic_to_lfo_frequency(float raw) {
+    // adapt values
+    float min = 2.0f;   //cm
+    float max = 400.0f; //cm
+
+
+
+}
+
+void potenciometer_to_lfo_depth(int raw) {
+    // min is 0 for both
+    float max = 65930223.0f;
+    float value = ((float) raw) / max;
+    Event depth = {SET_LFO_DEPTH, value};
+    push_event(&depth)
+}
