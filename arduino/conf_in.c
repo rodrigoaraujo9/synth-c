@@ -6,9 +6,55 @@
 #include <string.h>
 #include <sys/ioctl.h>
 
-struct dataDef {
-    int pot_val;
-} conf;
+#define PACKET_START 0xAA
+#define PACKET_END 0x55
+
+typedef struct __attribute__((packed)) {
+  uint8_t start;
+  int32_t potentiometer;
+  int32_t joystick_x;
+  int32_t joystick_y;
+  int32_t ultrasonic;
+  uint8_t end;
+} Packet;
+
+Packet g_conf;
+
+int read_packet(int sfd, Packet *out) {
+    uint8_t byte;
+
+    for (;;) {
+        if (read(sfd, &byte, 1) != 1) {
+            return 0;
+        }
+
+        if (byte == PACKET_START) {
+            break;
+        }
+    }
+
+    uint8_t *bytes = (uint8_t *)out;
+    bytes[0] = PACKET_START;
+
+    // read remaining bytes
+    size_t received = 1;
+
+    while (received < sizeof(Packet)) {
+        ssize_t n = read(sfd, bytes + received, sizeof(Packet) - received);
+
+        if (n <= 0) {
+            return 0;
+        }
+
+        received += n;
+    }
+
+    if (out->end != PACKET_END) {
+        return 0;
+    }
+
+    return 1;
+}
 
 
 int main() {
@@ -40,14 +86,16 @@ int main() {
 
     char c;
 
-    for(;;) {
-        char *c_bytes = (char*) &conf;
+    for (;;) {
+        Packet packet;
 
-        for (int i = 0; i < sizeof(conf); i++) {
-            if (read(sfd, &c_bytes[i],1) == -1) break;
+        if (!read_packet(sfd, &packet)) {
+            continue;
         }
 
-        printf("%d\n", conf.pot_val);
+        g_conf = packet;
+
+        printf("pot=%d x=%d y=%d\n", g_conf.potentiometer, g_conf.joystick_x, g_conf.joystick_y);
     }
 
     close(sfd);

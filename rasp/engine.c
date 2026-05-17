@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <pthread.h>
+#include <stdint.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -24,11 +25,14 @@
 
 /* Config */
 
+// Packet
+#define PACKET_START 0xAA
+#define PACKET_END 0x55
+
 // Data Format
 #define FORMAT ma_format_f32
 #define CHANNELS 2
 #define SAMPLE_RATE 48000
-
 
 // Effect Properties
 #define LPF_ORDER 8 // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
@@ -104,11 +108,22 @@ typedef struct {
     ma_float sample_rate;
 } Lfo;
 
+typedef struct __attribute__((packed)) {
+  uint8_t start;
+  int32_t potentiometer;
+  int32_t joystick_x;
+  int32_t joystick_y;
+  int32_t ultrasonic;
+  uint8_t end;
+} Packet;
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Globals */
 
 static State g_state;
+
+static Packet g_conf;
 
 static ma_waveform g_waves[MAX_NOTES];
 
@@ -121,9 +136,6 @@ static ma_node_base g_polyNode;
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
 
-static struct dataDef {
-    int pot_val;
-} conf;
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -252,7 +264,7 @@ void note_off(ma_uint32 note) {
 /// Normalized potentiometer output to a value between [0..1].
 /// Returns 1 upon succes and 0 upon failiure.
 int normalize_potentiometer(int in, ma_float *out) {
-    const int max = 65930223;
+    const int max = 1023;
     const int min = 0;
 
     if (out == NULL) return 0;
@@ -288,12 +300,12 @@ int normalize_joystick(int in_x, int in_y, ma_float *out_x, ma_float *out_y) {
 int normalize_ultrasonic(ma_float in, ma_float *out)
 {
     const ma_float min = 2.0f;
-    const ma_float max = 400.0f;
+    const ma_float max = 40.0f;
 
     if (out == NULL) return 0;
     if (in < min || in > max) return 0;
 
-    *out = (in - min) / (max - min);
+    *out = 1.0f - ((in - min) / (max - min));
 
     return 1;
 }
@@ -340,16 +352,68 @@ void update_pitch_offset(ma_float in) {
 
 /// Translates controller input into parameter updates.
 void update() {
-    ma_float normalized;
+    ma_float frequency, distance, x, y;
 
-    if (normalize_potentiometer(conf.pot_val, &normalized)) {
-        update_pitch_offset(normalized);
+    if (normalize_potentiometer(g_conf.potentiometer, &frequency)) {
+        update_lfo_depth(frequency);
+    }
+
+    if (normalize_joystick(g_conf.joystick_x, g_conf.joystick_y, &x, &y)) {
+        if (x <= 0.5) {
+            update_lpf_cutoff((0.5f - x) * 2.0f);
+            update_hpf_cutoff(0.0f);
+        } else {
+            update_hpf_cutoff((x - 0.5f) * 2.0f);
+            update_lpf_cutoff(0.0f);
+        }
+
+        update_pitch_offset(y);
+    }
+
+    if (normalize_ultrasonic(g_conf.ultrasonic, &distance)) {
+        update_lfo_frequency(distance);
     }
 }
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Communication */
+
+int read_packet(int sfd, Packet *out) {
+    uint8_t byte;
+
+    for (;;) {
+        if (read(sfd, &byte, 1) != 1) {
+            return 0;
+        }
+
+        if (byte == PACKET_START) {
+            break;
+        }
+    }
+
+    uint8_t *bytes = (uint8_t *)out;
+    bytes[0] = PACKET_START;
+
+    // read remaining bytes
+    size_t received = 1;
+
+    while (received < sizeof(Packet)) {
+        ssize_t n = read(sfd, bytes + received, sizeof(Packet) - received);
+
+        if (n <= 0) {
+            return 0;
+        }
+
+        received += n;
+    }
+
+    if (out->end != PACKET_END) {
+        return 0;
+    }
+
+    return 1;
+}
 
 void *poll_conf() {
     int sfd = open("/dev/cu.usbmodem1101", O_RDWR | O_NOCTTY);
@@ -383,14 +447,17 @@ void *poll_conf() {
 
     char c;
 
-    for(;;) {
-        char *c_bytes = (char*) &conf;
+    for (;;) {
+        Packet packet;
 
-        for (int i = 0; i < sizeof(conf); i++) {
-            if (read(sfd, &c_bytes[i],1) == -1) break;
+        if (!read_packet(sfd, &packet)) {
+            continue;
         }
 
-        printf("%d\n", conf.pot_val);
+        g_conf = packet;
+
+        //debug
+        printf("pot=%d x=%d y=%d\n", g_conf.potentiometer, g_conf.joystick_x, g_conf.joystick_y);
 
         update();
     }

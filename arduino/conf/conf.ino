@@ -1,23 +1,52 @@
 
-struct dataDef {
-    int pot_val;
-} conf;
+#define PACKET_START 0xAA
+#define PACKET_END 0x55
 
-int pot_pin = A3; // potenciometer
+typedef struct __attribute__((packed)) {
+  uint8_t start;
+  int32_t potentiometer;
+  int32_t joystick_x;
+  int32_t joystick_y;
+  int32_t ultrasonic;
+  uint8_t end;
+} Packet;
 
-void setup()
-{
+Packet conf;
+
+const int pot_pin = A3; // potenciometer
+const int x_pin = A8;
+const int y_pin = A9;
+const int trigPin = 9;
+const int echoPin = 10;
+
+float duration, distance;
+
+void setup() {
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
   Serial.begin(9600);
 }
 
-void loop()
-{
-    conf.pot_val = analogRead(pot_pin);
-    byte *c_bytes = (byte*) &conf;
+void loop() {
 
-    for (int i = 0; i < sizeof(conf); i++) {
-        Serial.write(c_bytes[i]);
-    }
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH);
+  distance = (duration * .0343) / 2;
+
+  conf.start = PACKET_START;
+  conf.potentiometer = analogRead(pot_pin);
+  conf.joystick_x = analogRead(x_pin);
+  conf.joystick_y = analogRead(y_pin);
+  conf.ultrasonic = distance;
+  conf.end = PACKET_END;
+
+  Serial.write((uint8_t *)&conf, sizeof(conf));
+  delay(5);
 }
 
 /*
@@ -36,7 +65,8 @@ char hexaKeys[ROWS][COLS] = {
 byte rowPins[ROWS] = {9, 8, 7, 6};
 byte colPins[COLS] = {5, 4, 3, 2};
 
-Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS,
+COLS);
 
 void setup(){
   Serial.begin(9600);
