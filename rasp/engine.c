@@ -1,12 +1,19 @@
 //! Base for this implementation was:
 //! https://miniaud.io/docs/examples/node_graph.html
 
+#include <stdlib.h>
 #define MINIAUDIO_IMPLEMENTATION
 #include "lib/miniaudio.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+#include <pthread.h>
+#include <math.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -232,6 +239,111 @@ void play_note(ma_uint32 note_value, useconds_t on_time, useconds_t off_time) {
     usleep(off_time);
 }
 
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Normalization and Update */
+
+void joystick_to_cutoff(float x) {
+    float middle = 512.0f; // adapt
+    float offset = x - middle;
+
+    Event lpf, hpf;
+
+    if (offset <= 0) {
+        // more drowned as distance form middle grows
+        ma_uint32 value = float_as_event_value(middle * LPF_CUTOFF_MAX / LPF_CUTOFF_MIN);
+        lpf = (Event){SET_LPF_CUTOFF, value};
+        hpf = (Event){SET_HPF_CUTOFF, HPF_CUTOFF_MIN};
+    } else if (offset > 0){
+        ma_uint32 value = float_as_event_value(middle * HPF_CUTOFF_MIN / HPF_CUTOFF_MAX);
+        lpf = (Event){SET_LPF_CUTOFF, LPF_CUTOFF_MAX};
+        hpf = (Event){SET_HPF_CUTOFF, value};
+    }
+    push_event(&lpf);
+    push_event(&hpf);
+}
+
+void joystick_to_pitch_offset(float y) {
+    float middle = 512.0f; // adapt
+    float offset = y - middle;
+
+    ma_uint32 value = float_as_event_value(middle * PITCH_OFFSET_MIN / PITCH_OFFSET_MAX);
+
+    Event pitch = {SET_PITCH_OFFSET, value};
+
+    push_event(&pitch);
+}
+
+void ultrassonic_to_lfo_frequency(float raw) {
+    // adapt values
+    float min = 2.0f;   //cm
+    float max = 400.0f; //cm
+}
+
+void potenciometer_to_lfo_depth(int raw) {
+    // min is 0 for both
+    float max = fmaxf(65930223.0f, (float) raw);
+    float value = ((float) raw) / max;
+    Event depth = {SET_LFO_DEPTH, float_as_event_value(value)};
+    push_event(&depth);
+}
+
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Communication Functions */
+
+struct dataDef {
+    int pot_val;
+} conf;
+
+void *poll_conf() {
+    int sfd = open("/dev/cu.usbmodem1101", O_RDWR | O_NOCTTY);
+    if (sfd == -1) {
+        printf("Error opening serial port: %s\n",strerror(errno));
+        return NULL;
+    }
+
+    struct termios options;
+    if (tcgetattr(sfd,&options) < 0) {
+        printf("Error getting attributes: %s\n",strerror(errno));
+        return NULL;
+    }
+
+    cfmakeraw(&options);
+    cfsetspeed(&options, 9600);
+
+    options.c_cflag &= ~CSTOPB;
+    options.c_cflag |= CLOCAL;
+    options.c_cflag |= CREAD;
+    options.c_cflag |= CRTSCTS;
+    options.c_cc[VTIME] = 0;
+    options.c_cc[VMIN] = 1;
+
+    if (tcsetattr(sfd,TCSANOW,&options) < 0) {
+        printf("Error setting attributes: %s\n",strerror(errno));
+        return NULL;
+    }
+
+    tcflush(sfd,TCIFLUSH);
+
+    char c;
+
+    for(;;) {
+        char *c_bytes = (char*) &conf;
+
+        for (int i = 0; i < sizeof(conf); i++) {
+            if (read(sfd, &c_bytes[i],1) == -1) break;
+        }
+
+        printf("%d\n", conf.pot_val);
+
+        potenciometer_to_lfo_depth(conf.pot_val);
+    }
+}
+
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Node Graph */
@@ -343,6 +455,7 @@ static ma_node_vtable g_tremoloNodeVTable = {
     1,
     0
 };
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -499,8 +612,7 @@ int main(void) {
         ma_atomic_uint32_set(&g_state.keys[i], 0);
     }
 
-
-  /* Node Graph */
+    /* Node Graph */
     {
         ma_node_graph_config nodeGraphConfig = ma_node_graph_config_init(CHANNELS);
 
@@ -537,7 +649,7 @@ int main(void) {
         ma_node_attach_output_bus(&g_hpfNode, 0, &g_lpfNode, 0);
     }
 
-    /* LFO Node */
+  /* LFO Node */
     {
         ma_uint32 inputChannels[1] = { CHANNELS };
         ma_uint32 outputChannels[1] = { CHANNELS };
@@ -559,7 +671,7 @@ int main(void) {
         ma_node_attach_output_bus(&g_lfoNode, 0, &g_hpfNode, 0);
     }
 
-    /* Waves */
+  /* Waves */
     {
         for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
             ma_waveform_config waveConfig = ma_waveform_config_init(
@@ -624,64 +736,15 @@ int main(void) {
             goto cleanup_wave;
         }
 
-        /* Cool Demo */
-        {
-            Event wave = { SET_WAVE, 3 };
-            Event lfo_freq = { SET_LFO_FREQUENCY, float_as_event_value(16.0f) };
-            Event lfo_depth = { SET_LFO_DEPTH, float_as_event_value(0.85f) };
-            Event hpf = { SET_HPF_CUTOFF, float_as_event_value(80.0f) };
-            Event lpf = { SET_LPF_CUTOFF, float_as_event_value(1800.0f) };
-
-            push_event(&wave);
-            push_event(&lfo_freq);
-            push_event(&lfo_depth);
-            push_event(&hpf);
-            push_event(&lpf);
-
-            Event c3_on = { NOTE_PRESSED, 48 };
-            Event e3_on = { NOTE_PRESSED, 52 };
-            Event g3_on = { NOTE_PRESSED, 55 };
-            Event b3_on = { NOTE_PRESSED, 59 };
-
-            push_event(&c3_on);
-            push_event(&e3_on);
-            push_event(&g3_on);
-            push_event(&b3_on);
-
-            for (int i = 0; i <= 100; i++) {
-                ma_float t = (ma_float)i / 100.0f;
-                ma_float freq = 16.0f + (0.5f - 16.0f) * t;
-                ma_float cutoff = 500.0f + (HPF_CUTOFF_MIN - 500.0f) * t;
-
-                Event lfo_ramp = { SET_LFO_FREQUENCY, float_as_event_value(freq) };
-                Event hpf_ramp = { SET_HPF_CUTOFF, float_as_event_value(cutoff) };
-
-                push_event(&lfo_ramp);
-                push_event(&hpf_ramp);
-
-                usleep(50000);
-            }
-
-            Event c3_off = { NOTE_RELEASED, 48 };
-            Event e3_off = { NOTE_RELEASED, 52 };
-            Event g3_off = { NOTE_RELEASED, 55 };
-            Event b3_off = { NOTE_RELEASED, 59 };
-
-            usleep(500000);
-
-            push_event(&c3_off);
-            push_event(&e3_off);
-            push_event(&g3_off);
-            push_event(&b3_off);
-
-            usleep(500000);
-        }
-
     #ifdef __EMSCRIPTEN__
         emscripten_set_main_loop(main_loop__em, 0, 1);
     #else
-        //for now this is as was initially. will detect keypresses for now to test.
-        // will detect keypress and release and publish it on event buf. asynchronously read event buf (if detects != current active_note value -> act)
+        // main
+        Event note = {NOTE_PRESSED, 70};
+        push_event(&note);
+        pthread_t conf_thread;
+        pthread_create(&conf_thread, NULL, poll_conf, NULL);
+
         printf("*info* press enter to quit...\n");
         getchar();
     #endif
@@ -701,53 +764,4 @@ int main(void) {
 
     ma_rb_uninit(&g_eventBuf);
     return 0;
-}
-
-/* ------------------------------------------------------------------------------------------------------------- */
-
-/* Normalization and Update */
-
-void joystick_to_cutoff(float x) {
-    float middle = 512.0f; // adapt
-    float offset = x - middle;
-
-    Event lpf, hpf;
-
-    if (offset <= 0) {
-        // more drowned as distance form middle grows
-        ma_uint32 value = float_as_event_value(middle * LPF_CUTOFF_MAX / LPF_CUTOFF_MIN);
-        lpf = (Event){SET_LPF_CUTOFF, value};
-        hpf = (Event){SET_HPF_CUTOFF, HPF_CUTOFF_MIN};
-    } else if (offset > 0){
-        ma_uint32 value = float_as_event_value(middle * HPF_CUTOFF_MIN / HPF_CUTOFF_MAX);
-        lpf = (Event){SET_LPF_CUTOFF, LPF_CUTOFF_MAX};
-        hpf = (Event){SET_HPF_CUTOFF, value};
-    }
-    push_event(&lpf);
-    push_event(&hpf);
-}
-
-void joystick_to_pitch_offset(float y) {
-    float middle = 512.0f; // adapt
-    float offset = y - middle;
-
-    ma_uint32 value = float_as_event_value(middle * PITCH_OFFSET_MIN / PITCH_OFFSET_MAX);
-
-    Event pitch = {SET_PITCH_OFFSET, value};
-
-    push_event(&pitch);
-}
-
-void ultrassonic_to_lfo_frequency(float raw) {
-    // adapt values
-    float min = 2.0f;   //cm
-    float max = 400.0f; //cm
-}
-
-void potenciometer_to_lfo_depth(int raw) {
-    // min is 0 for both
-    float max = 65930223.0f;
-    float value = ((float) raw) / max;
-    Event depth = {SET_LFO_DEPTH, value};
-    push_event(&depth);
 }
