@@ -31,16 +31,13 @@
 
 
 // Effect Properties
-#define LPF_CUTOFF 10000.0f        // the lower the more evident
-#define LPF_ORDER 8                // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
-
-#define HPF_CUTOFF 300.0f          // the higher the more evident
+#define LPF_ORDER 8 // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
 #define HPF_ORDER 8
 
 // Wave Config
 #define BASE_AMP 0.2f
 #define BASE_FREQ 440.0f // A4
-#define BASE_NOTE 69 // A4
+#define BASE_NOTE 69     // A4
 #define BASE_TYPE ma_waveform_type_sawtooth
 
 // Input Bounds
@@ -346,7 +343,7 @@ void update() {
     ma_float normalized;
 
     if (normalize_potentiometer(conf.pot_val, &normalized)) {
-        update_lfo_frequency(normalized);
+        update_pitch_offset(normalized);
     }
 }
 
@@ -669,8 +666,8 @@ int main(void) {
     ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)BASE_TYPE);
     ma_atomic_float_set(&g_state.lfo_frequency, 10.0f);
     ma_atomic_float_set(&g_state.lfo_depth, 1.0f);
-    ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF);
-    ma_atomic_float_set(&g_state.hpf_cutoff, HPF_CUTOFF);
+    ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF_MAX);
+    ma_atomic_float_set(&g_state.hpf_cutoff, LPF_CUTOFF_MIN);
     ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
     for (int i = 0; i < MAX_NOTES; i++) {
         ma_atomic_uint32_set(&g_state.keys[i], 0);
@@ -689,7 +686,7 @@ int main(void) {
 
   /* Low Pass Filter */
     {
-        ma_lpf_node_config lpfNodeConfig = ma_lpf_node_config_init(CHANNELS, SAMPLE_RATE, LPF_CUTOFF, LPF_ORDER);
+        ma_lpf_node_config lpfNodeConfig = ma_lpf_node_config_init(CHANNELS, SAMPLE_RATE, LPF_CUTOFF_MAX, LPF_ORDER);
 
         result = ma_lpf_node_init(&g_nodeGraph, &lpfNodeConfig, NULL, &g_lpfNode);
         if (result != MA_SUCCESS) {
@@ -702,7 +699,7 @@ int main(void) {
 
   /* High Pass Filter */
     {
-        ma_hpf_node_config hpfNodeConfig = ma_hpf_node_config_init(CHANNELS, SAMPLE_RATE, HPF_CUTOFF, HPF_ORDER);
+        ma_hpf_node_config hpfNodeConfig = ma_hpf_node_config_init(CHANNELS, SAMPLE_RATE, HPF_CUTOFF_MIN, HPF_ORDER);
 
         result = ma_hpf_node_init(&g_nodeGraph, &hpfNodeConfig, NULL, &g_hpfNode);
         if (result != MA_SUCCESS) {
@@ -804,8 +801,16 @@ int main(void) {
         emscripten_set_main_loop(main_loop__em, 0, 1);
     #else
         // main
-        Event note = {NOTE_PRESSED, 70};
-        push_event(&note);
+        Event c3_on = { NOTE_PRESSED, 48 +12 };
+        Event e3_on = { NOTE_PRESSED, 52 +12 };
+        Event g3_on = { NOTE_PRESSED, 55 +12 };
+        Event b3_on = { NOTE_PRESSED, 59 +12 };
+
+        push_event(&c3_on);
+        push_event(&e3_on);
+        push_event(&g3_on);
+        push_event(&b3_on);
+
         pthread_t conf_thread;
         pthread_create(&conf_thread, NULL, poll_conf, NULL);
 
