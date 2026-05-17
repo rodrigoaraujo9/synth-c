@@ -13,7 +13,6 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <pthread.h>
-#include <math.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -282,20 +281,96 @@ void ultrassonic_to_lfo_frequency(float raw) {
 }
 
 void potenciometer_to_lfo_depth(int raw) {
-    // min is 0 for both
-    float max = fmaxf(65930223.0f, (float) raw);
-    float value = ((float) raw) / max;
-    Event depth = {SET_LFO_DEPTH, float_as_event_value(value)};
+    int max_r = 65930223;
+    int min_r = 0;
+
+    if (raw < min_r || raw > max_r) return;
+
+    ma_float range_d = LFO_DEPTH_MAX - LFO_DEPTH_MIN;
+    ma_float range_r = (float)(max_r - min_r);
+
+    ma_float value = LFO_FREQUENCY_MIN + ((float) raw) * range_d / range_r;
+
+    Event depth = {SET_LFO_FREQUENCY, float_as_event_value(value)};
+
     push_event(&depth);
 }
 
 void potenciometer_to_lfo_frequency(int raw) {
-    if (raw < 0 || raw > 65930223) return;
-    float range_f = LFO_FREQUENCY_MAX - LFO_FREQUENCY_MIN;
-    float range_r = (float)(65930223 - 0);
-    float value = ((float) raw) * range_f / range_r;
-    Event frequency = {SET_LFO_FREQUENCY, float_as_event_value(value+LFO_FREQUENCY_MIN)};
+    int max_r = 65930223;
+    int min_r = 0;
+
+    if (raw < min_r || raw > max_r) return;
+
+    ma_float range_f = LFO_FREQUENCY_MAX - LFO_FREQUENCY_MIN;
+    ma_float range_r = (float)(max_r - min_r);
+
+    ma_float value = LFO_FREQUENCY_MIN + ((float) raw) * range_f / range_r;
+
+    Event frequency = {SET_LFO_FREQUENCY, float_as_event_value(value)};
+
     push_event(&frequency);
+}
+
+// [0..1]
+int normalize_potentiometer(int in, ma_float *out) {
+    const int max = 65930223;
+    const int min = 0;
+
+    if (out == NULL) return 0;
+    if (in < min || in > max) return 0;
+
+    const ma_float range = (ma_float)(max - min);
+
+    *out = ((ma_float)(in - min)) / range;
+
+    return 1;
+}
+
+// [0..1]
+int normalize_joystick(int in_x, int in_y, ma_float *out_x, ma_float *out_y) {
+    const int max = 1023;
+    const int min = 0;
+
+    if (out_x == NULL || out_y == NULL) return 0;
+    if (in_x < min || in_x > max) return 0;
+    if (in_y < min || in_y > max) return 0;
+
+    const ma_float range = (ma_float)(max - min);
+
+    *out_x = (ma_float)(in_x - min) / range;
+    *out_y = (ma_float)(in_y - min) / range;
+
+    return 1;
+}
+
+// [0..1]
+int normalize_ultrassonic(int in, ma_float *out) {
+    const int max = 65930223;
+    const int min = 0;
+
+    if (out == NULL) return 0;
+    if (in < min || in > max) return 0;
+
+    const ma_float range = (ma_float)(max - min);
+
+    *out = ((ma_float)(in - min)) / range;
+
+    return 1;
+}
+
+// [0..1]
+int normalize_ultrasonic(ma_float in, ma_float *out)
+{
+    const ma_float min = 2.0f;
+    const ma_float max = 400.0f;
+
+    if (out == NULL) return 0;
+    if (in < min || in > max) return 0;
+
+    *out = (in - min) / (max - min);
+
+    return 1;
 }
 
 
