@@ -125,9 +125,14 @@ static ma_node_base g_polyNode;
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Helper Functions */
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Ring Buffer */
 
 int push_event(const Event *event) {
     void *buffer = NULL;
@@ -165,6 +170,11 @@ int pop_event(Event *event) {
     return ma_rb_commit_read(&g_eventBuf, sizeof(*event)) == MA_SUCCESS;
 }
 
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Event */
+
 ma_uint32 float_as_event_value(ma_float value) {
     ma_uint32 raw = 0;
     memcpy(&raw, &value, sizeof(value));
@@ -181,18 +191,7 @@ ma_float event_value_as_float(ma_uint32 raw) {
     return value;
 }
 
-ma_float frequency_from_midi_note(ma_float note) {
-    // c[-1] = 0
-    // a[4]  = 69
-    // to freq consider base -> 440 (a[4])
-    // do the math with distance from a[4]
-    const ma_float diff = note - BASE_NOTE;
-    const ma_float freq = BASE_FREQ * ma_powf(2.0f, diff/12.0f);
-
-    return freq;
-}
-
-int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
+int event_value_as_waveform(ma_uint32 value, ma_waveform_type *waveform) {
     if (waveform == NULL) {
         return -1;
     }
@@ -215,6 +214,22 @@ int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
     }
 }
 
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Note */
+
+ma_float frequency_from_midi_note(ma_float note) {
+    // c[-1] = 0
+    // a[4]  = 69
+    // to freq consider base -> 440 (a[4])
+    // do the math with distance from a[4]
+    const ma_float diff = note - BASE_NOTE;
+    const ma_float freq = BASE_FREQ * ma_powf(2.0f, diff/12.0f);
+
+    return freq;
+}
+
 void note_on(ma_uint32 note) {
     if (note >= MAX_NOTES) return;
 
@@ -226,6 +241,7 @@ void note_off(ma_uint32 note) {
 
     ma_atomic_uint32_set(&g_state.keys[note], 0);
 }
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -322,7 +338,7 @@ void update_pitch_offset(ma_float in) {
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
-/* Communication Functions */
+/* Communication */
 
 struct dataDef {
     int pot_val;
@@ -495,6 +511,10 @@ static ma_node_vtable g_tremoloNodeVTable = {
 
 /* Main Functions */
 
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Callback */
+
 // backend runs this funct on repeat
 void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uint32 frameCount) {
     Event event;
@@ -506,7 +526,7 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             case SET_WAVE: {
                 ma_waveform_type waveform;
 
-                if (waveform_from_ma_uint32(event.value, &waveform) != 0){
+                if (event_value_as_waveform(event.value, &waveform) != 0){
                     printf("*error* failed to convert uint32 to waveform");
                     break;
                 }
@@ -626,6 +646,10 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
     (void)pInput;
 }
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Main */
 
 int main(void) {
     ma_result result;
