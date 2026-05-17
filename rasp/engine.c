@@ -227,92 +227,12 @@ void note_off(ma_uint32 note) {
     ma_atomic_uint32_set(&g_state.keys[note], 0);
 }
 
-void play_note(ma_uint32 note_value, useconds_t on_time, useconds_t off_time) {
-    Event on = { NOTE_PRESSED, note_value };
-    Event off = { NOTE_RELEASED, note_value };
-
-    push_event(&on);
-    usleep(on_time);
-
-    push_event(&off);
-    usleep(off_time);
-}
-
-
 /* ------------------------------------------------------------------------------------------------------------- */
 
-/* Normalization and Update */
+/* Normalization */
 
-void joystick_to_cutoff(float x) {
-    float middle = 512.0f; // adapt
-    float offset = x - middle;
-
-    Event lpf, hpf;
-
-    if (offset <= 0) {
-        // more drowned as distance form middle grows
-        ma_uint32 value = float_as_event_value(middle * LPF_CUTOFF_MAX / LPF_CUTOFF_MIN);
-        lpf = (Event){SET_LPF_CUTOFF, value};
-        hpf = (Event){SET_HPF_CUTOFF, HPF_CUTOFF_MIN};
-    } else if (offset > 0){
-        ma_uint32 value = float_as_event_value(middle * HPF_CUTOFF_MIN / HPF_CUTOFF_MAX);
-        lpf = (Event){SET_LPF_CUTOFF, LPF_CUTOFF_MAX};
-        hpf = (Event){SET_HPF_CUTOFF, value};
-    }
-    push_event(&lpf);
-    push_event(&hpf);
-}
-
-void joystick_to_pitch_offset(float y) {
-    float middle = 512.0f; // adapt
-    float offset = y - middle;
-
-    ma_uint32 value = float_as_event_value(middle * PITCH_OFFSET_MIN / PITCH_OFFSET_MAX);
-
-    Event pitch = {SET_PITCH_OFFSET, value};
-
-    push_event(&pitch);
-}
-
-void ultrassonic_to_lfo_frequency(float raw) {
-    // adapt values
-    float min = 2.0f;   //cm
-    float max = 400.0f; //cm
-}
-
-void potenciometer_to_lfo_depth(int raw) {
-    int max_r = 65930223;
-    int min_r = 0;
-
-    if (raw < min_r || raw > max_r) return;
-
-    ma_float range_d = LFO_DEPTH_MAX - LFO_DEPTH_MIN;
-    ma_float range_r = (float)(max_r - min_r);
-
-    ma_float value = LFO_FREQUENCY_MIN + ((float) raw) * range_d / range_r;
-
-    Event depth = {SET_LFO_FREQUENCY, float_as_event_value(value)};
-
-    push_event(&depth);
-}
-
-void potenciometer_to_lfo_frequency(int raw) {
-    int max_r = 65930223;
-    int min_r = 0;
-
-    if (raw < min_r || raw > max_r) return;
-
-    ma_float range_f = LFO_FREQUENCY_MAX - LFO_FREQUENCY_MIN;
-    ma_float range_r = (float)(max_r - min_r);
-
-    ma_float value = LFO_FREQUENCY_MIN + ((float) raw) * range_f / range_r;
-
-    Event frequency = {SET_LFO_FREQUENCY, float_as_event_value(value)};
-
-    push_event(&frequency);
-}
-
-// [0..1]
+// Normalized potentiometer output to a value between [0..1].
+// Returns 1 upon succes and 0 upon failiure.
 int normalize_potentiometer(int in, ma_float *out) {
     const int max = 65930223;
     const int min = 0;
@@ -327,7 +247,8 @@ int normalize_potentiometer(int in, ma_float *out) {
     return 1;
 }
 
-// [0..1]
+// Normalized joystick output to a value between [0..1].
+// Returns 1 upon succes and 0 upon failiure.
 int normalize_joystick(int in_x, int in_y, ma_float *out_x, ma_float *out_y) {
     const int max = 1023;
     const int min = 0;
@@ -344,22 +265,8 @@ int normalize_joystick(int in_x, int in_y, ma_float *out_x, ma_float *out_y) {
     return 1;
 }
 
-// [0..1]
-int normalize_ultrassonic(int in, ma_float *out) {
-    const int max = 65930223;
-    const int min = 0;
-
-    if (out == NULL) return 0;
-    if (in < min || in > max) return 0;
-
-    const ma_float range = (ma_float)(max - min);
-
-    *out = ((ma_float)(in - min)) / range;
-
-    return 1;
-}
-
-// [0..1]
+// Normalized ultrasonic output to a value between [0..1].
+// Returns 1 upon succes and 0 upon failiure.
 int normalize_ultrasonic(ma_float in, ma_float *out)
 {
     const ma_float min = 2.0f;
@@ -373,6 +280,45 @@ int normalize_ultrasonic(ma_float in, ma_float *out)
     return 1;
 }
 
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Update */
+
+// Updates LFO frequency from a normalized input [0..1].
+void update_lfo_frequency(ma_float in) {
+    ma_float value = LFO_FREQUENCY_MIN + in * (LFO_FREQUENCY_MAX - LFO_FREQUENCY_MIN);
+    Event event = {SET_LFO_FREQUENCY, float_as_event_value(value)};
+    push_event(&event);
+}
+
+// Updates LFO depth from a normalized input [0..1].
+void update_lfo_depth(ma_float in) {
+    ma_float value = LFO_DEPTH_MIN + in * (LFO_DEPTH_MAX - LFO_DEPTH_MIN);
+    Event event = {SET_LFO_DEPTH, float_as_event_value(value)};
+    push_event(&event);
+}
+
+// Updates HPF cutoff from a normalized input [0..1].
+void update_hpf_cutoff(ma_float in) {
+    ma_float value = HPF_CUTOFF_MIN + in * (HPF_CUTOFF_MAX - HPF_CUTOFF_MIN);
+    Event event = {SET_HPF_CUTOFF, float_as_event_value(value)};
+    push_event(&event);
+}
+
+// Updates LPF cutoff from a normalized input [0..1].
+void update_lpf_cutoff(ma_float in) {
+    ma_float value = LPF_CUTOFF_MAX - in * (LPF_CUTOFF_MAX - LPF_CUTOFF_MIN);
+    Event event = {SET_LPF_CUTOFF, float_as_event_value(value)};
+    push_event(&event);
+}
+
+// Updates pitch offset from a normalized input [0..1].
+void update_pitch_offset(ma_float in) {
+    ma_float value = PITCH_OFFSET_MIN - in * (PITCH_OFFSET_MAX - PITCH_OFFSET_MIN);
+    Event event = {SET_PITCH_OFFSET, float_as_event_value(value)};
+    push_event(&event);
+}
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -423,7 +369,11 @@ void *poll_conf() {
 
         printf("%d\n", conf.pot_val);
 
-        potenciometer_to_lfo_frequency(conf.pot_val);
+        ma_float *normalized;
+
+        if (normalize_potentiometer(conf.pot_val, normalized)) {
+            update_lfo_frequency(*normalized);
+        }
     }
 }
 
