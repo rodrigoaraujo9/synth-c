@@ -369,10 +369,10 @@ void *poll_conf() {
 
         printf("%d\n", conf.pot_val);
 
-        ma_float *normalized;
+        ma_float normalized;
 
-        if (normalize_potentiometer(conf.pot_val, normalized)) {
-            update_lfo_frequency(*normalized);
+        if (normalize_potentiometer(conf.pot_val, &normalized)) {
+            update_lfo_frequency(normalized);
         }
     }
 }

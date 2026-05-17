@@ -1,4 +1,3 @@
-#include <Keypad.h>
 
 struct dataDef {
     int pot_val;
