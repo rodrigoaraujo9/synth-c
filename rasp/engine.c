@@ -7,11 +7,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <termios.h>
-#include <errno.h>
-#include <sys/ioctl.h>
-#include <pthread.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -124,7 +119,6 @@ static ma_node_base g_polyNode;
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
 
-
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Helper Functions */
@@ -215,57 +209,142 @@ int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
     }
 }
 
+void note_on(ma_uint32 note) {
+    if (note >= MAX_NOTES) return;
+
+    ma_atomic_uint32_set(&g_state.keys[note], 1);
+}
+
+void note_off(ma_uint32 note) {
+    if (note >= MAX_NOTES) return;
+
+    ma_atomic_uint32_set(&g_state.keys[note], 0);
+}
+
+void play_note(ma_uint32 note_value, useconds_t on_time, useconds_t off_time) {
+    Event on = { NOTE_PRESSED, note_value };
+    Event off = { NOTE_RELEASED, note_value };
+
+    push_event(&on);
+    usleep(on_time);
+
+    push_event(&off);
+    usleep(off_time);
+}
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
-/* Communication Functions */
+/* Node Graph */
 
-struct dataDef {
-    int pot_val;
-} conf;
+static void poly_node_process_pcm_frames(
+    ma_node* pNode,
+    const float** ppFramesIn,
+    ma_uint32* pFrameCountIn,
+    float** ppFramesOut,
+    ma_uint32* pFrameCountOut
+) {
+    (void)pNode;
+    (void)ppFramesIn;
+    (void)pFrameCountIn;
 
-void *poll_conf() {
-    int sfd = open("/dev/cu.usbmodem1101", O_RDWR | O_NOCTTY);
-    if (sfd == -1) {
-        printf("Error opening serial port: %s\n",strerror(errno));
-        return NULL;
+    float* out = ppFramesOut[0];
+    ma_uint32 framesToProcess = *pFrameCountOut;
+
+    memset(out, 0, framesToProcess * CHANNELS * sizeof(float));
+
+    const ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
+
+    const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
+
+    ma_uint32 active_count = 0;
+
+    for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
+        if (ma_atomic_uint32_get(&g_state.keys[note]) != 0) {
+            active_count++;
+        }
     }
 
-    struct termios options;
-    if (tcgetattr(sfd,&options) < 0) {
-        printf("Error getting attributes: %s\n",strerror(errno));
-        return NULL;
+    if (active_count == 0) {
+        *pFrameCountOut = framesToProcess;
+        return;
     }
 
-    cfmakeraw(&options);
-    cfsetspeed(&options, 9600);
+    const ma_float amp = BASE_AMP / (ma_float)active_count;
 
-    options.c_cflag &= ~CSTOPB;
-    options.c_cflag |= CLOCAL;
-    options.c_cflag |= CREAD;
-    options.c_cflag |= CRTSCTS;
-    options.c_cc[VTIME] = 0;
-    options.c_cc[VMIN] = 1;
-
-    if (tcsetattr(sfd,TCSANOW,&options) < 0) {
-        printf("Error setting attributes: %s\n",strerror(errno));
-        return NULL;
-    }
-
-    tcflush(sfd,TCIFLUSH);
-
-    char c;
-
-    for(;;) {
-        char *c_bytes = (char*) &conf;
-
-        for (int i = 0; i < sizeof(conf); i++) {
-            if (read(sfd, &c_bytes[i],1) == -1) break;
+    for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
+        if (ma_atomic_uint32_get(&g_state.keys[note]) == 0) {
+            continue;
         }
 
-        const Event e = (Event) {SET_LFO_DEPTH, conf.pot_val};
-        push_event(&e);
+        ma_waveform_set_type(&g_waves[note], waveform);
+        ma_waveform_set_frequency(&g_waves[note], frequency_from_midi_note((ma_float)note + offset));
+        ma_waveform_set_amplitude(&g_waves[note], amp);
+
+        for (ma_uint32 i = 0; i < framesToProcess; i++) {
+            float sample[CHANNELS];
+
+            ma_waveform_read_pcm_frames(&g_waves[note], sample, 1, NULL);
+
+            for (ma_uint32 c = 0; c < CHANNELS; c++) {
+                out[i * CHANNELS + c] += sample[c];
+            }
+        }
     }
+
+    *pFrameCountOut = framesToProcess;
 }
+
+static ma_node_vtable g_polyNodeVTable = {
+    poly_node_process_pcm_frames,
+    NULL,
+    0,
+    1,
+    0
+};
+
+static void tremolo_node_process_pcm_frames(
+    ma_node* pNode,
+    const float** ppFramesIn,
+    ma_uint32* pFrameCountIn,
+    float** ppFramesOut,
+    ma_uint32* pFrameCountOut
+) {
+    Lfo* lfo = (Lfo*)pNode;
+
+    const float* in = ppFramesIn[0];
+    float* out = ppFramesOut[0];
+
+    ma_uint32 framesToProcess = *pFrameCountOut;
+
+    ma_float lfo_frequency = ma_atomic_float_get(&g_state.lfo_frequency);
+    ma_float lfo_depth = ma_atomic_float_get(&g_state.lfo_depth);
+
+    for (ma_uint32 i = 0; i < framesToProcess; i++) {
+        ma_float gain = (1.0f - lfo_depth) + (lfo_depth * ((1.0f + ma_sinf(2.0f * MA_PI * lfo->phase)) * 0.5f));
+        for (ma_uint32 c = 0; c < CHANNELS; c++) {
+            out[i * CHANNELS + c] = in[i * CHANNELS + c] * gain;
+        }
+
+        lfo->phase += lfo_frequency / lfo->sample_rate;
+
+        while (lfo->phase >= 1.0f) {
+            lfo->phase -= 1.0f;
+        }
+    }
+
+    *pFrameCountIn = framesToProcess;
+    *pFrameCountOut = framesToProcess;
+}
+
+static ma_node_vtable g_tremoloNodeVTable = {
+    tremolo_node_process_pcm_frames,
+    NULL,
+    1,
+    1,
+    0
+};
+
+/* ------------------------------------------------------------------------------------------------------------- */
 
 /* Main Functions */
 
@@ -420,9 +499,6 @@ int main(void) {
         ma_atomic_uint32_set(&g_state.keys[i], 0);
     }
 
-
-    pthread_t conf_thread;
-    pthread_create(&conf_thread, NULL, poll_conf, NULL);
 
   /* Node Graph */
     {
@@ -662,13 +738,10 @@ void joystick_to_pitch_offset(float y) {
     push_event(&pitch);
 }
 
-Event ultrassonic_to_lfo_frequency(float raw) {
+void ultrassonic_to_lfo_frequency(float raw) {
     // adapt values
     float min = 2.0f;   //cm
     float max = 400.0f; //cm
-
-
-
 }
 
 void potenciometer_to_lfo_depth(int raw) {
@@ -676,5 +749,5 @@ void potenciometer_to_lfo_depth(int raw) {
     float max = 65930223.0f;
     float value = ((float) raw) / max;
     Event depth = {SET_LFO_DEPTH, value};
-    push_event(&depth)
+    push_event(&depth);
 }
