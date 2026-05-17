@@ -18,6 +18,7 @@
     void main_loop__em(void) {}
 #endif
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Config */
@@ -29,11 +30,9 @@
 
 
 // Effect Properties
-#define LPF_BIAS 0.5f              // higher values make the low-pass filter more audible. Must be between 0 and 1.
-#define LPF_CUTOFF 100.0f          // the lower the more evident
+#define LPF_CUTOFF 10000.0f        // the lower the more evident
 #define LPF_ORDER 8                // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
 
-#define HPF_BIAS (1.0f - LPF_BIAS) // inverse to lpf bias for now
 #define HPF_CUTOFF 300.0f          // the higher the more evident
 #define HPF_ORDER 8
 
@@ -45,6 +44,7 @@
 
 // Input Bounds
 #define NOTE_MAX 128
+#define MAX_NOTES NOTE_MAX // like keyboard. one key per note
 
 #define PITCH_OFFSET_MAX 2.0f
 #define PITCH_OFFSET_MIN -2.0f
@@ -61,24 +61,23 @@
 #define HPF_CUTOFF_MAX 4000.0f
 #define HPF_CUTOFF_MIN 20.0f
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Types */
 
-// uses thread safe datastructures provided by miniaudio (STILL UNUSED)
 typedef struct {
-    ma_atomic_uint32   waveform;       // [0..4] will be mapped to ma_waveform_type
+    ma_atomic_uint32   waveform;        // [0..4] will be mapped to ma_waveform_type
 
-    ma_atomic_uint32   note_is_active; // 0 or 1
-    ma_atomic_uint32   note;           // MIDI note number -> base
+    ma_atomic_uint32   keys[MAX_NOTES]; // [0..1] Active keys (mapped by note)
 
-    ma_atomic_float    pitch_offset;   // Semi-tones makes more sense for logic but less for readability
+    ma_atomic_float    pitch_offset;    // Semi-tones makes more sense for logic but less for readability
 
-    ma_atomic_float    lfo_frequency;  // Hz
-    ma_atomic_float    lfo_depth;      // [0..1]
+    ma_atomic_float    lfo_frequency;   // Hz
+    ma_atomic_float    lfo_depth;       // [0..1]
 
-    ma_atomic_float    lpf_cutoff;     // Hz
-    ma_atomic_float    hpf_cutoff;     // Hz
+    ma_atomic_float    lpf_cutoff;      // Hz
+    ma_atomic_float    hpf_cutoff;      // Hz
 } State;
 
 typedef enum {
@@ -101,22 +100,30 @@ typedef struct {
     ma_uint32 value;
 } Event;
 
+typedef struct {
+    ma_node_base base;
+    ma_float phase;
+    ma_float sample_rate;
+} Lfo;
+
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Globals */
 
 static State g_state;
 
-static ma_waveform g_wave;
+static ma_waveform g_waves[MAX_NOTES];
 
 static ma_node_graph g_nodeGraph;
 static ma_lpf_node g_lpfNode;
 static ma_hpf_node g_hpfNode;
-static ma_splitter_node g_splitterNode;
-static ma_data_source_node g_waveNode;
+static Lfo g_lfoNode;
+static ma_node_base g_polyNode;
 
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -156,6 +163,12 @@ int pop_event(Event *event) {
     memcpy(event, buffer, sizeof(*event));
 
     return ma_rb_commit_read(&g_eventBuf, sizeof(*event)) == MA_SUCCESS;
+}
+
+ma_uint32 float_as_event_value(ma_float value) {
+    ma_uint32 raw = 0;
+    memcpy(&raw, &value, sizeof(value));
+    return raw;
 }
 
 ma_int32 event_value_as_int32(ma_uint32 raw) {
@@ -263,8 +276,6 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
     MA_ASSERT(pDevice->playback.channels == CHANNELS);
 
     while (pop_event(&event)) {
-        // right now they are operating with direct values
-        // later maybe also responsible for transformation of raw arduino values
         switch (event.type) {
             case SET_WAVE: {
                 ma_waveform_type waveform;
@@ -323,6 +334,17 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                 }
 
                 ma_atomic_float_set(&g_state.lpf_cutoff, cutoff);
+
+                ma_lpf_config lpfConfig = ma_lpf_config_init(
+                    FORMAT,
+                    CHANNELS,
+                    SAMPLE_RATE,
+                    cutoff,
+                    LPF_ORDER
+                );
+
+                ma_lpf_node_reinit(&lpfConfig, &g_lpfNode);
+
                 break;
             }
 
@@ -335,26 +357,36 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                 }
 
                 ma_atomic_float_set(&g_state.hpf_cutoff, cutoff);
+
+                ma_hpf_config hpfConfig = ma_hpf_config_init(
+                    FORMAT,
+                    CHANNELS,
+                    SAMPLE_RATE,
+                    cutoff,
+                    HPF_ORDER
+                );
+
+                ma_hpf_node_reinit(&hpfConfig, &g_hpfNode);
                 break;
             }
 
             case NOTE_PRESSED: {
-                if (event.value > NOTE_MAX) {
+                if (event.value >= NOTE_MAX) {
                     printf("*error* incorrect note value");
                     break;
                 }
 
-                ma_atomic_uint32_set(&g_state.note, event.value);
-                ma_atomic_uint32_set(&g_state.note_is_active, 1);
+                ma_atomic_uint32_set(&g_state.keys[event.value], 1);
                 break;
             }
 
             case NOTE_RELEASED: {
-                const ma_uint32 active_note = ma_atomic_uint32_get(&g_state.note);
-
-                if (event.value == active_note){
-                    ma_atomic_uint32_set(&g_state.note_is_active, 0);
+                if (event.value >= NOTE_MAX) {
+                    printf("*error* incorrect note value");
+                    break;
                 }
+
+                ma_atomic_uint32_set(&g_state.keys[event.value], 0);
                 break;
             }
 
@@ -363,20 +395,6 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                 break;
             }
         }
-    }
-
-    {
-        const ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
-        const ma_float note = (ma_float)ma_atomic_uint32_get(&g_state.note);
-        const ma_float note_is_active = ma_atomic_uint32_get(&g_state.note_is_active);
-        const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
-        const ma_float frequency = frequency_from_midi_note(note + offset);
-
-        ma_waveform_set_type(&g_wave, waveform);
-        ma_waveform_set_frequency(&g_wave, frequency);
-        ma_waveform_set_amplitude(&g_wave, note_is_active ? BASE_AMP : 0.0f);
-
-        // since lfo is missing updates for lfo are missing too
     }
 
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
@@ -393,13 +411,15 @@ int main(void) {
     }
 
     ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)BASE_TYPE);
-    ma_atomic_float_set(&g_state.lfo_frequency, 0.0f);
-    ma_atomic_float_set(&g_state.lfo_depth, 0.0f);
+    ma_atomic_float_set(&g_state.lfo_frequency, 10.0f);
+    ma_atomic_float_set(&g_state.lfo_depth, 1.0f);
     ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF);
     ma_atomic_float_set(&g_state.hpf_cutoff, HPF_CUTOFF);
     ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
-    ma_atomic_uint32_set(&g_state.note_is_active, 0);
-    ma_atomic_uint32_set(&g_state.note, 0);
+    for (int i = 0; i < MAX_NOTES; i++) {
+        ma_atomic_uint32_set(&g_state.keys[i], 0);
+    }
+
 
     pthread_t conf_thread;
     pthread_create(&conf_thread, NULL, poll_conf, NULL);
@@ -426,7 +446,6 @@ int main(void) {
         }
 
         ma_node_attach_output_bus(&g_lpfNode, 0, ma_node_graph_get_endpoint(&g_nodeGraph), 0);
-        ma_node_set_output_bus_volume(&g_lpfNode, 0, LPF_BIAS);
     }
 
   /* High Pass Filter */
@@ -439,46 +458,66 @@ int main(void) {
             goto cleanup_lpf;
         }
 
-        ma_node_attach_output_bus(&g_hpfNode, 0, ma_node_graph_get_endpoint(&g_nodeGraph), 0);
-        ma_node_set_output_bus_volume(&g_hpfNode, 0, HPF_BIAS);
+        ma_node_attach_output_bus(&g_hpfNode, 0, &g_lpfNode, 0);
     }
 
-  /* Splitter */
+    /* LFO Node */
     {
-        ma_splitter_node_config splitterNodeConfig = ma_splitter_node_config_init(CHANNELS);
+        ma_uint32 inputChannels[1] = { CHANNELS };
+        ma_uint32 outputChannels[1] = { CHANNELS };
 
-        result = ma_splitter_node_init(&g_nodeGraph, &splitterNodeConfig, NULL, &g_splitterNode);
+        ma_node_config tremoloConfig = ma_node_config_init();
+        tremoloConfig.vtable = &g_tremoloNodeVTable;
+        tremoloConfig.pInputChannels = inputChannels;
+        tremoloConfig.pOutputChannels = outputChannels;
+
+        result = ma_node_init(&g_nodeGraph, &tremoloConfig, NULL, &g_lfoNode.base);
         if (result != MA_SUCCESS) {
-            printf("*error* failed to initialize splitter node.\n");
+            printf("*error* failed to initialize tremolo node.\n");
             goto cleanup_hpf;
         }
 
-        ma_node_attach_output_bus(&g_splitterNode, 0, &g_lpfNode, 0);
-        ma_node_attach_output_bus(&g_splitterNode, 1, &g_hpfNode, 0);
+        g_lfoNode.phase = 0.0f;
+        g_lfoNode.sample_rate = SAMPLE_RATE;
+
+        ma_node_attach_output_bus(&g_lfoNode, 0, &g_hpfNode, 0);
     }
 
-  /* Wave */
+    /* Waves */
     {
-        ma_waveform_config waveConfig = ma_waveform_config_init(FORMAT, CHANNELS, SAMPLE_RATE, BASE_TYPE, BASE_AMP, BASE_FREQ);
+        for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
+            ma_waveform_config waveConfig = ma_waveform_config_init(
+                FORMAT,
+                CHANNELS,
+                SAMPLE_RATE,
+                BASE_TYPE,
+                0.0f,
+                frequency_from_midi_note((ma_float)note)
+            );
 
-        result = ma_waveform_init(&waveConfig, &g_wave);
-        if (result != MA_SUCCESS) {
-            printf("*error* failed to initialize wave waveform.\n");
-            goto cleanup_splitter;
+            result = ma_waveform_init(&waveConfig, &g_waves[note]);
+            if (result != MA_SUCCESS) {
+                printf("*error* failed to initialize wave waveform.\n");
+                goto cleanup_lfo;
+            }
         }
     }
 
   /* Wrap wave as a data source node and attach it to the graph */
     {
-        ma_data_source_node_config waveNodeConfig = ma_data_source_node_config_init(&g_wave);
+        ma_uint32 outputChannels[1] = { CHANNELS };
 
-        result = ma_data_source_node_init(&g_nodeGraph, &waveNodeConfig, NULL, &g_waveNode);
+        ma_node_config polyConfig = ma_node_config_init();
+        polyConfig.vtable = &g_polyNodeVTable;
+        polyConfig.pOutputChannels = outputChannels;
+
+        result = ma_node_init(&g_nodeGraph, &polyConfig, NULL, &g_polyNode);
         if (result != MA_SUCCESS) {
             printf("*error* failed to initialize wave node.\n");
-            goto cleanup_splitter;
+            goto cleanup_lfo;
         }
 
-        ma_node_attach_output_bus(&g_waveNode, 0, &g_splitterNode, 0);
+        ma_node_attach_output_bus(&g_polyNode, 0, &g_lfoNode, 0);
     }
 
   /* Playback Device */
@@ -509,24 +548,57 @@ int main(void) {
             goto cleanup_wave;
         }
 
-        // test to see that it is reading the buf and executing the rpcs
+        /* Cool Demo */
         {
-            Event on = { NOTE_PRESSED, BASE_NOTE };   // A4
-            Event off = { NOTE_RELEASED, BASE_NOTE }; // release same note
+            Event wave = { SET_WAVE, 3 };
+            Event lfo_freq = { SET_LFO_FREQUENCY, float_as_event_value(16.0f) };
+            Event lfo_depth = { SET_LFO_DEPTH, float_as_event_value(0.85f) };
+            Event hpf = { SET_HPF_CUTOFF, float_as_event_value(80.0f) };
+            Event lpf = { SET_LPF_CUTOFF, float_as_event_value(1800.0f) };
 
-            if (!push_event(&on)) {
-                printf("*error* failed to push NOTE_PRESSED event.\n");
-            } else {
-                printf("*info* NOTE_PRESSED sent.\n");
+            push_event(&wave);
+            push_event(&lfo_freq);
+            push_event(&lfo_depth);
+            push_event(&hpf);
+            push_event(&lpf);
+
+            Event c3_on = { NOTE_PRESSED, 48 };
+            Event e3_on = { NOTE_PRESSED, 52 };
+            Event g3_on = { NOTE_PRESSED, 55 };
+            Event b3_on = { NOTE_PRESSED, 59 };
+
+            push_event(&c3_on);
+            push_event(&e3_on);
+            push_event(&g3_on);
+            push_event(&b3_on);
+
+            for (int i = 0; i <= 100; i++) {
+                ma_float t = (ma_float)i / 100.0f;
+                ma_float freq = 16.0f + (0.5f - 16.0f) * t;
+                ma_float cutoff = 500.0f + (HPF_CUTOFF_MIN - 500.0f) * t;
+
+                Event lfo_ramp = { SET_LFO_FREQUENCY, float_as_event_value(freq) };
+                Event hpf_ramp = { SET_HPF_CUTOFF, float_as_event_value(cutoff) };
+
+                push_event(&lfo_ramp);
+                push_event(&hpf_ramp);
+
+                usleep(50000);
             }
 
-            sleep(2);
+            Event c3_off = { NOTE_RELEASED, 48 };
+            Event e3_off = { NOTE_RELEASED, 52 };
+            Event g3_off = { NOTE_RELEASED, 55 };
+            Event b3_off = { NOTE_RELEASED, 59 };
 
-            if (!push_event(&off)) {
-                printf("*error* failed to push NOTE_RELEASED event.\n");
-            } else {
-                printf("*info* NOTE_RELEASED sent.\n");
-            }
+            usleep(500000);
+
+            push_event(&c3_off);
+            push_event(&e3_off);
+            push_event(&g3_off);
+            push_event(&b3_off);
+
+            usleep(500000);
         }
 
     #ifdef __EMSCRIPTEN__
@@ -541,9 +613,9 @@ int main(void) {
     }
 
   cleanup_wave:
-    ma_data_source_node_uninit(&g_waveNode, NULL);
-  cleanup_splitter:
-    ma_splitter_node_uninit(&g_splitterNode, NULL);
+    ma_node_uninit(&g_polyNode, NULL);
+  cleanup_lfo:
+    ma_node_uninit(&g_lfoNode.base, NULL);
   cleanup_hpf:
     ma_hpf_node_uninit(&g_hpfNode, NULL);
   cleanup_lpf:
