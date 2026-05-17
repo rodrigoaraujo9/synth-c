@@ -7,6 +7,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+#include <pthread.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -197,6 +202,57 @@ int waveform_from_ma_uint32(ma_uint32 value, ma_waveform_type *waveform) {
     }
 }
 
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Communication Functions */
+
+struct dataDef {
+    int pot_val;
+} conf;
+
+void *poll_conf() {
+    int sfd = open("/dev/cu.usbmodem1101", O_RDWR | O_NOCTTY);
+    if (sfd == -1) {
+        printf("Error opening serial port: %s\n",strerror(errno));
+        return NULL;
+    }
+
+    struct termios options;
+    if (tcgetattr(sfd,&options) < 0) {
+        printf("Error getting attributes: %s\n",strerror(errno));
+        return NULL;
+    }
+
+    cfmakeraw(&options);
+    cfsetspeed(&options, 9600);
+
+    options.c_cflag &= ~CSTOPB;
+    options.c_cflag |= CLOCAL;
+    options.c_cflag |= CREAD;
+    options.c_cflag |= CRTSCTS;
+    options.c_cc[VTIME] = 0;
+    options.c_cc[VMIN] = 1;
+
+    if (tcsetattr(sfd,TCSANOW,&options) < 0) {
+        printf("Error setting attributes: %s\n",strerror(errno));
+        return NULL;
+    }
+
+    tcflush(sfd,TCIFLUSH);
+
+    char c;
+
+    for(;;) {
+        char *c_bytes = (char*) &conf;
+
+        for (int i = 0; i < sizeof(conf); i++) {
+            if (read(sfd, &c_bytes[i],1) == -1) break;
+        }
+
+        const Event e = (Event) {SET_LFO_DEPTH, conf.pot_val};
+        push_event(&e);
+    }
+}
 
 /* Main Functions */
 
@@ -344,6 +400,9 @@ int main(void) {
     ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
     ma_atomic_uint32_set(&g_state.note_is_active, 0);
     ma_atomic_uint32_set(&g_state.note, 0);
+
+    pthread_t conf_thread;
+    pthread_create(&conf_thread, NULL, poll_conf, NULL);
 
   /* Node Graph */
     {
