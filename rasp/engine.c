@@ -315,7 +315,7 @@ void update_lpf_cutoff(ma_float in) {
 
 // Updates pitch offset from a normalized input [0..1].
 void update_pitch_offset(ma_float in) {
-    ma_float value = PITCH_OFFSET_MIN - in * (PITCH_OFFSET_MAX - PITCH_OFFSET_MIN);
+    ma_float value = PITCH_OFFSET_MIN + in * (PITCH_OFFSET_MAX - PITCH_OFFSET_MIN);
     Event event = {SET_PITCH_OFFSET, float_as_event_value(value)};
     push_event(&event);
 }
