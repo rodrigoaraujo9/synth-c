@@ -107,7 +107,6 @@ typedef struct {
     ma_float sample_rate;
 } Lfo;
 
-
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Globals */
@@ -125,6 +124,9 @@ static ma_node_base g_polyNode;
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
 
+static struct dataDef {
+    int pot_val;
+} conf;
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -219,6 +221,7 @@ int event_value_as_waveform(ma_uint32 value, ma_waveform_type *waveform) {
 
 /* Note */
 
+/// Returns the frequency of a MIDI note [0..128]
 ma_float frequency_from_midi_note(ma_float note) {
     // c[-1] = 0
     // a[4]  = 69
@@ -230,12 +233,14 @@ ma_float frequency_from_midi_note(ma_float note) {
     return freq;
 }
 
+/// Plays a MIDI note [0..128]
 void note_on(ma_uint32 note) {
     if (note >= MAX_NOTES) return;
 
     ma_atomic_uint32_set(&g_state.keys[note], 1);
 }
 
+/// Stops a MIDI note [0..128] if active
 void note_off(ma_uint32 note) {
     if (note >= MAX_NOTES) return;
 
@@ -247,8 +252,8 @@ void note_off(ma_uint32 note) {
 
 /* Normalization */
 
-// Normalized potentiometer output to a value between [0..1].
-// Returns 1 upon succes and 0 upon failiure.
+/// Normalized potentiometer output to a value between [0..1].
+/// Returns 1 upon succes and 0 upon failiure.
 int normalize_potentiometer(int in, ma_float *out) {
     const int max = 65930223;
     const int min = 0;
@@ -263,8 +268,8 @@ int normalize_potentiometer(int in, ma_float *out) {
     return 1;
 }
 
-// Normalized joystick output to a value between [0..1].
-// Returns 1 upon succes and 0 upon failiure.
+/// Normalized joystick output to a value between [0..1].
+/// Returns 1 upon succes and 0 upon failiure.
 int normalize_joystick(int in_x, int in_y, ma_float *out_x, ma_float *out_y) {
     const int max = 1023;
     const int min = 0;
@@ -281,8 +286,8 @@ int normalize_joystick(int in_x, int in_y, ma_float *out_x, ma_float *out_y) {
     return 1;
 }
 
-// Normalized ultrasonic output to a value between [0..1].
-// Returns 1 upon succes and 0 upon failiure.
+/// Normalized ultrasonic output to a value between [0..1].
+/// Returns 1 upon succes and 0 upon failiure.
 int normalize_ultrasonic(ma_float in, ma_float *out)
 {
     const ma_float min = 2.0f;
@@ -301,48 +306,53 @@ int normalize_ultrasonic(ma_float in, ma_float *out)
 
 /* Update */
 
-// Updates LFO frequency from a normalized input [0..1].
+/// Updates LFO frequency from a normalized input [0..1].
 void update_lfo_frequency(ma_float in) {
     ma_float value = LFO_FREQUENCY_MIN + in * (LFO_FREQUENCY_MAX - LFO_FREQUENCY_MIN);
     Event event = {SET_LFO_FREQUENCY, float_as_event_value(value)};
     push_event(&event);
 }
 
-// Updates LFO depth from a normalized input [0..1].
+/// Updates LFO depth from a normalized input [0..1].
 void update_lfo_depth(ma_float in) {
     ma_float value = LFO_DEPTH_MIN + in * (LFO_DEPTH_MAX - LFO_DEPTH_MIN);
     Event event = {SET_LFO_DEPTH, float_as_event_value(value)};
     push_event(&event);
 }
 
-// Updates HPF cutoff from a normalized input [0..1].
+/// Updates HPF cutoff from a normalized input [0..1].
 void update_hpf_cutoff(ma_float in) {
     ma_float value = HPF_CUTOFF_MIN + in * (HPF_CUTOFF_MAX - HPF_CUTOFF_MIN);
     Event event = {SET_HPF_CUTOFF, float_as_event_value(value)};
     push_event(&event);
 }
 
-// Updates LPF cutoff from a normalized input [0..1].
+/// Updates LPF cutoff from a normalized input [0..1].
 void update_lpf_cutoff(ma_float in) {
     ma_float value = LPF_CUTOFF_MAX - in * (LPF_CUTOFF_MAX - LPF_CUTOFF_MIN);
     Event event = {SET_LPF_CUTOFF, float_as_event_value(value)};
     push_event(&event);
 }
 
-// Updates pitch offset from a normalized input [0..1].
+/// Updates pitch offset from a normalized input [0..1].
 void update_pitch_offset(ma_float in) {
     ma_float value = PITCH_OFFSET_MIN + in * (PITCH_OFFSET_MAX - PITCH_OFFSET_MIN);
     Event event = {SET_PITCH_OFFSET, float_as_event_value(value)};
     push_event(&event);
 }
 
+/// Translates controller input into parameter updates.
+void update() {
+    ma_float normalized;
+
+    if (normalize_potentiometer(conf.pot_val, &normalized)) {
+        update_lfo_frequency(normalized);
+    }
+}
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Communication */
-
-struct dataDef {
-    int pot_val;
-} conf;
 
 void *poll_conf() {
     int sfd = open("/dev/cu.usbmodem1101", O_RDWR | O_NOCTTY);
@@ -385,11 +395,7 @@ void *poll_conf() {
 
         printf("%d\n", conf.pot_val);
 
-        ma_float normalized;
-
-        if (normalize_potentiometer(conf.pot_val, &normalized)) {
-            update_lfo_frequency(normalized);
-        }
+        update();
     }
 }
 
