@@ -52,7 +52,7 @@
 #define PITCH_OFFSET_MIN -2.0f
 
 #define LFO_FREQUENCY_MAX 20.0f
-#define LFO_FREQUENCY_MIN 0.5f
+#define LFO_FREQUENCY_MIN 0.0f
 
 #define LFO_DEPTH_MAX 1.0f
 #define LFO_DEPTH_MIN 0.0f
@@ -289,6 +289,15 @@ void potenciometer_to_lfo_depth(int raw) {
     push_event(&depth);
 }
 
+void potenciometer_to_lfo_frequency(int raw) {
+    if (raw < 0 || raw > 65930223) return;
+    float range_f = LFO_FREQUENCY_MAX - LFO_FREQUENCY_MIN;
+    float range_r = (float)(65930223 - 0);
+    float value = ((float) raw) * range_f / range_r;
+    Event frequency = {SET_LFO_FREQUENCY, float_as_event_value(value+LFO_FREQUENCY_MIN)};
+    push_event(&frequency);
+}
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -339,7 +348,7 @@ void *poll_conf() {
 
         printf("%d\n", conf.pot_val);
 
-        potenciometer_to_lfo_depth(conf.pot_val);
+        potenciometer_to_lfo_frequency(conf.pot_val);
     }
 }
 
