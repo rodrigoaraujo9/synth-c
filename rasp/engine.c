@@ -383,34 +383,25 @@ int read_packet(int sfd, Packet *out) {
     uint8_t byte;
 
     for (;;) {
-        if (read(sfd, &byte, 1) != 1) {
-            return 0;
-        }
+        if (read(sfd, &byte, 1) != 1) return 0;
 
-        if (byte == PACKET_START) {
-            break;
-        }
+        if (byte == PACKET_START) break;
     }
 
     uint8_t *bytes = (uint8_t *)out;
     bytes[0] = PACKET_START;
 
-    // read remaining bytes
     size_t received = 1;
 
     while (received < sizeof(Packet)) {
         ssize_t n = read(sfd, bytes + received, sizeof(Packet) - received);
 
-        if (n <= 0) {
-            return 0;
-        }
+        if (n <= 0) return 0;
 
         received += n;
     }
 
-    if (out->end != PACKET_END) {
-        return 0;
-    }
+    if (out->end != PACKET_END) return 0;
 
     return 1;
 }
