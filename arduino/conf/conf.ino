@@ -8,22 +8,36 @@ typedef struct __attribute__((packed)) {
   int32_t joystick_x;
   int32_t joystick_y;
   int32_t ultrasonic;
+  int32_t first_note; // can change
+  int32_t second_note;
+  int32_t third_note;
+  int32_t fourth_note;
   uint8_t end;
 } Packet;
 
 Packet conf;
 
+const int first_note_pin  = 2;
+const int second_note_pin = 3;
+const int third_note_pin  = 4;
+const int fourth_note_pin = 5;
+
 const int pot_pin = A3; // potenciometer
-const int x_pin = A8;
-const int y_pin = A9;
+const int x_pin   = A8;
+const int y_pin   = A9;
 const int trigPin = 9;
 const int echoPin = 10;
 
 float duration, distance;
 
 void setup() {
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
+  pinMode(trigPin,         OUTPUT);
+  pinMode(echoPin,         INPUT);
+  pinMode(first_note_pin,  INPUT);
+  pinMode(second_note_pin, INPUT);
+  pinMode(third_note_pin,  INPUT);
+  pinMode(fourth_note_pin, INPUT);
+
   Serial.begin(9600);
 }
 
@@ -38,12 +52,16 @@ void loop() {
   duration = pulseIn(echoPin, HIGH);
   distance = (duration * .0343) / 2;
 
-  conf.start = PACKET_START;
-  conf.potentiometer = analogRead(pot_pin);
-  conf.joystick_x = analogRead(x_pin);
-  conf.joystick_y = analogRead(y_pin);
-  conf.ultrasonic = distance;
-  conf.end = PACKET_END;
+  conf.start           = PACKET_START;
+  conf.potentiometer   = analogRead(pot_pin);
+  conf.joystick_x      = analogRead(x_pin);
+  conf.joystick_y      = analogRead(y_pin);
+  conf.ultrasonic      = distance;
+  conf.first_note_up   = analogRead(first_note_pin);
+  conf.second_note_pin = analogRead(second_note_pin);
+  conf.third_note_pin  = analogRead(third_note_pin);
+  conf.fourth_note_pin = analogRead(fourth_note_pin);
+  conf.end             = PACKET_END;
 
   Serial.write((uint8_t *)&conf, sizeof(conf));
   delay(5);
