@@ -1,4 +1,3 @@
-
 #define PACKET_START 0xAA
 #define PACKET_END 0x55
 
@@ -17,23 +16,23 @@ typedef struct __attribute__((packed)) {
 
 Packet conf;
 
-const int first_note_pin  = 2;
+const int first_note_pin  = 49;
 const int second_note_pin = 3;
 const int third_note_pin  = 4;
 const int fourth_note_pin = 5;
 
-const int pot_pin = A3; // potenciometer
-const int x_pin   = A8;
-const int y_pin   = A9;
-const int trigPin = 9;
-const int echoPin = 10;
+const int pot_pin = A15; // potenciometer
+const int x_pin   = A0;
+const int y_pin   = A1;
+const int trigPin = 52;
+const int echoPin = 53;
 
 float duration, distance;
 
 void setup() {
   pinMode(trigPin,         OUTPUT);
   pinMode(echoPin,         INPUT);
-  pinMode(first_note_pin,  INPUT);
+  pinMode(first_note_pin,  INPUT_PULLUP);
   pinMode(second_note_pin, INPUT);
   pinMode(third_note_pin,  INPUT);
   pinMode(fourth_note_pin, INPUT);
@@ -57,10 +56,12 @@ void loop() {
   conf.joystick_x      = analogRead(x_pin);
   conf.joystick_y      = analogRead(y_pin);
   conf.ultrasonic      = distance;
-  conf.first_note_up   = analogRead(first_note_pin);
-  conf.second_note_pin = analogRead(second_note_pin);
-  conf.third_note_pin  = analogRead(third_note_pin);
-  conf.fourth_note_pin = analogRead(fourth_note_pin);
+
+  conf.first_note      = digitalRead(first_note_pin);
+  conf.second_note     = digitalRead(second_note_pin);
+  conf.third_note      = digitalRead(third_note_pin);
+  conf.fourth_note     = digitalRead(fourth_note_pin);
+
   conf.end             = PACKET_END;
 
   Serial.write((uint8_t *)&conf, sizeof(conf));
