@@ -114,6 +114,10 @@ typedef struct __attribute__((packed)) {
   int32_t joystick_x;
   int32_t joystick_y;
   int32_t ultrasonic;
+  int32_t first_note; // can change
+  int32_t second_note;
+  int32_t third_note;
+  int32_t fourth_note;
   uint8_t end;
 } Packet;
 
@@ -373,6 +377,18 @@ void update() {
     if (normalize_ultrasonic(g_conf.ultrasonic, &distance)) {
         update_lfo_frequency(distance);
     }
+
+    if (g_conf.first_note == 1) {
+        note_off(48 +12);
+        note_off(52 +12);
+        note_off(55 +12);
+        note_off(59 +12);
+    } else {
+        note_on(48 +12);
+        note_on(52 +12);
+        note_on(55 +12);
+        note_on(59 +12);
+    }
 }
 
 /* ------------------------------------------------------------------------------------------------------------- */
@@ -406,8 +422,16 @@ int read_packet(int sfd, Packet *out) {
     return 1;
 }
 
-void *poll_conf() {
-    int sfd = open("/dev/cu.usbmodem1101", O_RDWR | O_NOCTTY);
+void *poll_conf(void *arg) {
+    #if defined(__APPLE__) && defined(__MACH__)
+        #define SERIAL_PORT "/dev/cu.usbmodem1101"
+    #elif defined(__linux__)
+        #define SERIAL_PORT "/dev/ttyACM0"
+    #else
+        #error Unsupported platform
+    #endif
+
+    int sfd = open(SERIAL_PORT, O_RDWR | O_NOCTTY);
     if (sfd == -1) {
         printf("Error opening serial port: %s\n",strerror(errno));
         return NULL;
@@ -425,7 +449,7 @@ void *poll_conf() {
     options.c_cflag &= ~CSTOPB;
     options.c_cflag |= CLOCAL;
     options.c_cflag |= CREAD;
-    options.c_cflag |= CRTSCTS;
+    options.c_cflag &= ~CRTSCTS;
     options.c_cc[VTIME] = 0;
     options.c_cc[VMIN] = 1;
 
@@ -448,7 +472,7 @@ void *poll_conf() {
         g_conf = packet;
 
         //debug
-        printf("pot=%d x=%d y=%d\n", g_conf.potentiometer, g_conf.joystick_x, g_conf.joystick_y);
+        printf("pot=%d x=%d y=%d, but=%d, dist=%d\n", g_conf.potentiometer, g_conf.joystick_x, g_conf.joystick_y, g_conf.first_note, g_conf.ultrasonic);
 
         update();
     }
@@ -859,7 +883,7 @@ int main(void) {
         emscripten_set_main_loop(main_loop__em, 0, 1);
     #else
         // main
-        Event c3_on = { NOTE_PRESSED, 48 +12 };
+        /* Event c3_on = { NOTE_PRESSED, 48 +12 };
         Event e3_on = { NOTE_PRESSED, 52 +12 };
         Event g3_on = { NOTE_PRESSED, 55 +12 };
         Event b3_on = { NOTE_PRESSED, 59 +12 };
@@ -867,7 +891,7 @@ int main(void) {
         push_event(&c3_on);
         push_event(&e3_on);
         push_event(&g3_on);
-        push_event(&b3_on);
+        push_event(&b3_on); */
 
         pthread_t conf_thread;
         pthread_create(&conf_thread, NULL, poll_conf, NULL);
