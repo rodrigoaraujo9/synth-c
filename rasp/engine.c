@@ -48,6 +48,18 @@
 #define NOTE_MAX 128
 #define MAX_NOTES NOTE_MAX // like keyboard. one key per note
 
+#define ATTACK_MAX 5.0f
+#define ATTACK_MIN 0.0f
+
+#define DECAY_MAX 1.0f
+#define DECAY_MIN 0.0f
+
+#define SUSTAIN_MAX 1.0f
+#define SUSTAIN_MIN 0.0f
+
+#define RELEASE_MAX 5.0f
+#define RELEASE_MIN 0.0f
+
 #define PITCH_OFFSET_MAX 2.0f
 #define PITCH_OFFSET_MIN -2.0f
 
@@ -71,6 +83,11 @@
 typedef struct {
     ma_atomic_uint32   waveform;        // [0..4] will be mapped to ma_waveform_type
 
+    ma_atomic_float    attack;          // Seconds
+    ma_atomic_float    decay;           // [0..1]
+    ma_atomic_float    sustain;         // [0..1]
+    ma_atomic_float    release;         // Seconds
+
     ma_atomic_uint32   keys[MAX_NOTES]; // [0..1] Active keys (mapped by note)
 
     ma_atomic_float    pitch_offset;    // Semi-tones makes more sense for logic but less for readability
@@ -90,7 +107,11 @@ typedef enum {
     SET_LFO_FREQUENCY,
     SET_LFO_DEPTH,
     SET_LPF_CUTOFF,
-    SET_HPF_CUTOFF
+    SET_HPF_CUTOFF,
+    SET_ATTACK,
+    SET_DECAY,
+    SET_SUSTAIN,
+    SET_RELEASE
 } Type;
 
 typedef struct {
@@ -107,6 +128,20 @@ typedef struct {
     ma_float phase;
     ma_float sample_rate;
 } Lfo;
+
+typedef enum {
+    IDLE = 0,
+    ATTACK,
+    DECAY,
+    SUSTAIN,
+    RELEASE
+} Stage;
+
+typedef struct {
+    Stage stage;
+    ma_float gain;               // [0..1] represents the current envelope gain or level (as in intensity of sound)
+    ma_float release_start_gain; // represents the level at which the envelope was when it entered release stage
+} Envelope;
 
 typedef struct __attribute__((packed)) {
   uint8_t start;
@@ -130,6 +165,8 @@ static State g_state;
 static Packet g_conf;
 
 static ma_waveform g_waves[MAX_NOTES];
+
+static Envelope g_envelopes[MAX_NOTES];
 
 static ma_node_graph g_nodeGraph;
 static ma_lpf_node g_lpfNode;
@@ -250,6 +287,9 @@ ma_float frequency_from_midi_note(ma_float note) {
 void note_on(ma_uint32 note) {
     if (note >= MAX_NOTES) return;
 
+    // atack should ramp from current value so it flows nicely with
+    // release instead of creating a click
+    g_envelopes[note].stage = ATTACK;
     ma_atomic_uint32_set(&g_state.keys[note], 1);
 }
 
@@ -257,9 +297,78 @@ void note_on(ma_uint32 note) {
 void note_off(ma_uint32 note) {
     if (note >= MAX_NOTES) return;
 
-    ma_atomic_uint32_set(&g_state.keys[note], 0);
+    if (g_envelopes[note].stage != IDLE && g_envelopes[note].stage != RELEASE) {
+        g_envelopes[note].release_start_gain = g_envelopes[note].gain;
+        g_envelopes[note].stage = RELEASE;
+    }
 }
 
+
+/* ------------------------------------------------------------------------------------------------------------- */
+
+/* Envelope */
+
+/// Advance a single envelope by one sample. Returns current gain [0..1].
+/// Clears the key bit when release finishes.
+static inline ma_float envelope_step(ma_uint32 note, ma_float a, ma_float d, ma_float s, ma_float r) {
+    Envelope *env = &g_envelopes[note];
+    const ma_float dt = 1.0f / (ma_float)SAMPLE_RATE;
+
+    switch (env->stage) {
+        case ATTACK: {
+            if (a <= 0.0f) {
+                env->gain = 1.0f;
+                env->stage = DECAY;
+            } else {
+                env->gain += dt / a;
+                if (env->gain >= 1.0f) {
+                    env->gain = 1.0f;
+                    env->stage = DECAY;
+                }
+            }
+            break;
+        }
+        case DECAY: {
+            if (d <= 0.0f) {
+                env->gain = s;
+                env->stage = SUSTAIN;
+            } else {
+                env->gain -= (1.0f - s) * (dt / d);
+                if (env->gain <= s) {
+                    env->gain = s;
+                    env->stage = SUSTAIN;
+                }
+            }
+            break;
+        }
+        case SUSTAIN: {
+            env->gain = s;
+            break;
+        }
+        case RELEASE: {
+            if (r <= 0.0f) {
+                env->gain = 0.0f;
+                env->stage = IDLE;
+                ma_atomic_uint32_set(&g_state.keys[note], 0);
+            } else {
+                env->gain -= env->release_start_gain * (dt / r);
+                if (env->gain <= 0.0f) {
+                    env->gain = 0.0f;
+                    env->stage = IDLE;
+                    // when stops playing only then is note set to 0
+                    ma_atomic_uint32_set(&g_state.keys[note], 0);
+                }
+            }
+            break;
+        }
+        case IDLE:
+        default:
+            env->gain = 0.0f;
+            break;
+    }
+
+    return env->gain;
+}
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -351,6 +460,34 @@ void update_lpf_cutoff(ma_float in) {
 void update_pitch_offset(ma_float in) {
     ma_float value = PITCH_OFFSET_MIN + in * (PITCH_OFFSET_MAX - PITCH_OFFSET_MIN);
     Event event = {SET_PITCH_OFFSET, float_as_event_value(value)};
+    push_event(&event);
+}
+
+/// Updates attack from a normalized input [0..1].
+void update_attack(ma_float in) {
+    ma_float value = ATTACK_MIN + in * (ATTACK_MAX - ATTACK_MIN);
+    Event event = {SET_ATTACK, float_as_event_value(value)};
+    push_event(&event);
+}
+
+/// Updates decay from a normalized input [0..1].
+void update_decay(ma_float in) {
+    ma_float value = DECAY_MIN + in * (DECAY_MAX - DECAY_MIN);
+    Event event = {SET_DECAY, float_as_event_value(value)};
+    push_event(&event);
+}
+
+/// Updates sustain from a normalized input [0..1].
+void update_sustain(ma_float in) {
+    ma_float value = SUSTAIN_MIN + in * (SUSTAIN_MAX - SUSTAIN_MIN);
+    Event event = {SET_SUSTAIN, float_as_event_value(value)};
+    push_event(&event);
+}
+
+/// Updates release from a normalized input [0..1].
+void update_release(ma_float in) {
+    ma_float value = RELEASE_MIN + in * (RELEASE_MAX - RELEASE_MIN);
+    Event event = {SET_RELEASE, float_as_event_value(value)};
     push_event(&event);
 }
 
@@ -500,11 +637,14 @@ static void poly_node_process_pcm_frames(
     memset(out, 0, framesToProcess * CHANNELS * sizeof(float));
 
     const ma_waveform_type waveform = (ma_waveform_type)ma_atomic_uint32_get(&g_state.waveform);
-
     const ma_float offset = ma_atomic_float_get(&g_state.pitch_offset);
 
-    ma_uint32 active_count = 0;
+    const ma_float a = ma_atomic_float_get(&g_state.attack);
+    const ma_float d = ma_atomic_float_get(&g_state.decay);
+    const ma_float s = ma_atomic_float_get(&g_state.sustain);
+    const ma_float r = ma_atomic_float_get(&g_state.release);
 
+    ma_uint32 active_count = 0;
     for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
         if (ma_atomic_uint32_get(&g_state.keys[note]) != 0) {
             active_count++;
@@ -529,11 +669,12 @@ static void poly_node_process_pcm_frames(
 
         for (ma_uint32 i = 0; i < framesToProcess; i++) {
             float sample[CHANNELS];
-
             ma_waveform_read_pcm_frames(&g_waves[note], sample, 1, NULL);
 
+            ma_float env_gain = envelope_step(note, a, d, s, r);
+
             for (ma_uint32 c = 0; c < CHANNELS; c++) {
-                out[i * CHANNELS + c] += sample[c];
+                out[i * CHANNELS + c] += sample[c] * env_gain;
             }
         }
     }
@@ -617,6 +758,54 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                 }
 
                 ma_atomic_uint32_set(&g_state.waveform, event.value);
+                break;
+            }
+
+            case SET_ATTACK: {
+                ma_float attack = event_value_as_float(event.value);
+
+                if (attack > ATTACK_MAX || attack < ATTACK_MIN) {
+                    printf("*error* out of bounds attack value on SET_ATTACK event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.attack, attack);
+                break;
+            }
+
+            case SET_DECAY: {
+                ma_float decay = event_value_as_float(event.value);
+
+                if (decay > DECAY_MAX || decay < DECAY_MIN) {
+                    printf("*error* out of bounds decay value on SET_DECAY event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.decay, decay);
+                break;
+            }
+
+            case SET_SUSTAIN: {
+                ma_float sustain = event_value_as_float(event.value);
+
+                if (sustain > SUSTAIN_MAX || sustain < SUSTAIN_MIN) {
+                    printf("*error* out of bounds sustain value on SET_SUSTAIN event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.sustain, sustain);
+                break;
+            }
+
+            case SET_RELEASE: {
+                ma_float release = event_value_as_float(event.value);
+
+                if (release > SUSTAIN_MAX || release < SUSTAIN_MIN) {
+                    printf("*error* out of bounds release value on SET_RELEASE event");
+                    break;
+                }
+
+                ma_atomic_float_set(&g_state.release, release);
                 break;
             }
 
@@ -707,6 +896,8 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                     break;
                 }
 
+                g_envelopes[event.value].stage = ATTACK;
+                g_envelopes[event.value].gain = 0.0f;
                 ma_atomic_uint32_set(&g_state.keys[event.value], 1);
                 break;
             }
@@ -717,7 +908,11 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
                     break;
                 }
 
-                ma_atomic_uint32_set(&g_state.keys[event.value], 0);
+                Envelope *env = &g_envelopes[event.value];
+                if (env->stage != IDLE && env->stage != RELEASE) {
+                    env->release_start_gain = env->gain;
+                    env->stage = RELEASE;
+                }
                 break;
             }
 
@@ -746,14 +941,26 @@ int main(void) {
     }
 
     ma_atomic_uint32_set(&g_state.waveform, (ma_uint32)BASE_TYPE);
-    ma_atomic_float_set(&g_state.lfo_frequency, 10.0f);
-    ma_atomic_float_set(&g_state.lfo_depth, 1.0f);
-    ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF_MAX);
-    ma_atomic_float_set(&g_state.hpf_cutoff, LPF_CUTOFF_MIN);
-    ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
+
+    ma_atomic_float_set(&g_state.attack,  0.5f);
+    ma_atomic_float_set(&g_state.decay,   0.1f);
+    ma_atomic_float_set(&g_state.sustain, 0.8f);
+    ma_atomic_float_set(&g_state.release, 1.0f);
+
     for (int i = 0; i < MAX_NOTES; i++) {
         ma_atomic_uint32_set(&g_state.keys[i], 0);
+        g_envelopes[i].stage = IDLE;
+        g_envelopes[i].gain = 0.0f;
+        g_envelopes[i].release_start_gain = 0.0f;
     }
+
+    ma_atomic_float_set(&g_state.lfo_frequency, 10.0f);
+    ma_atomic_float_set(&g_state.lfo_depth, 1.0f);
+
+    ma_atomic_float_set(&g_state.lpf_cutoff, LPF_CUTOFF_MAX);
+    ma_atomic_float_set(&g_state.hpf_cutoff, LPF_CUTOFF_MIN);
+
+    ma_atomic_float_set(&g_state.pitch_offset, 0.0f);
 
     /* Node Graph */
     {
@@ -883,15 +1090,29 @@ int main(void) {
         emscripten_set_main_loop(main_loop__em, 0, 1);
     #else
         // main
-        /* Event c3_on = { NOTE_PRESSED, 48 +12 };
-        Event e3_on = { NOTE_PRESSED, 52 +12 };
-        Event g3_on = { NOTE_PRESSED, 55 +12 };
-        Event b3_on = { NOTE_PRESSED, 59 +12 };
 
-        push_event(&c3_on);
-        push_event(&e3_on);
-        push_event(&g3_on);
-        push_event(&b3_on); */
+        // // A simple demo
+        // Event c3_on = { NOTE_PRESSED, 48 +12 };
+        // Event e3_on = { NOTE_PRESSED, 52 +12 };
+        // Event g3_on = { NOTE_PRESSED, 55 +12 };
+        // Event b3_on = { NOTE_PRESSED, 59 +12 };
+
+        // push_event(&c3_on);
+        // push_event(&e3_on);
+        // push_event(&g3_on);
+        // push_event(&b3_on);
+
+        // sleep(2);
+
+        // Event c3_off = { NOTE_RELEASED, 48 +12 };
+        // Event e3_off = { NOTE_RELEASED, 52 +12 };
+        // Event g3_off = { NOTE_RELEASED, 55 +12 };
+        // Event b3_off = { NOTE_RELEASED, 59 +12 };
+
+        // push_event(&c3_off);
+        // push_event(&e3_off);
+        // push_event(&g3_off);
+        // push_event(&b3_off);
 
         pthread_t conf_thread;
         pthread_create(&conf_thread, NULL, poll_conf, NULL);
