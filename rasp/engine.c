@@ -146,13 +146,17 @@ typedef struct {
 typedef struct __attribute__((packed)) {
   uint8_t start;
   int32_t potentiometer;
+  // int32_t potentiometer_a;
+  // int32_t potentiometer_d;
+  // int32_t potentiometer_s;
+  // int32_t potentiometer_r;
   int32_t joystick_x;
   int32_t joystick_y;
   int32_t ultrasonic;
-  int32_t first_note; // can change
-  int32_t second_note;
-  int32_t third_note;
-  int32_t fourth_note;
+  int32_t button_1;
+  int32_t button_2;
+  int32_t button_3;
+  int32_t button_4;
   uint8_t end;
 } Packet;
 
@@ -515,7 +519,7 @@ void update() {
         update_lfo_frequency(distance);
     }
 
-    if (g_conf.first_note == 1) {
+    if (g_conf.button_1 == 1) {
         note_off(48 +12);
         note_off(52 +12);
         note_off(55 +12);
@@ -609,7 +613,7 @@ void *poll_conf(void *arg) {
         g_conf = packet;
 
         //debug
-        printf("pot=%d x=%d y=%d, but=%d, dist=%d\n", g_conf.potentiometer, g_conf.joystick_x, g_conf.joystick_y, g_conf.first_note, g_conf.ultrasonic);
+        printf("pot=%d x=%d y=%d, but=%d, dist=%d\n", g_conf.potentiometer, g_conf.joystick_x, g_conf.joystick_y, g_conf.button_1, g_conf.ultrasonic);
 
         update();
     }
