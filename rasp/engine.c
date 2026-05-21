@@ -146,10 +146,10 @@ typedef struct {
 typedef struct __attribute__((packed)) {
   uint8_t start;
   int32_t potentiometer;
-  // int32_t potentiometer_a;
-  // int32_t potentiometer_d;
-  // int32_t potentiometer_s;
-  // int32_t potentiometer_r;
+  int32_t potentiometer_a;
+  int32_t potentiometer_d;
+  int32_t potentiometer_s;
+  int32_t potentiometer_r;
   int32_t joystick_x;
   int32_t joystick_y;
   int32_t ultrasonic;
@@ -157,6 +157,7 @@ typedef struct __attribute__((packed)) {
   int32_t button_2;
   int32_t button_3;
   int32_t button_4;
+  int32_t button_5;
   uint8_t end;
 } Packet;
 
@@ -497,7 +498,23 @@ void update_release(ma_float in) {
 
 /// Translates controller input into parameter updates.
 void update() {
-    ma_float frequency, distance, x, y;
+    ma_float attack, decay, sustain, release, frequency, distance, x, y;
+
+    if (normalize_potentiometer(g_conf.potentiometer_a, &attack)) {
+        update_attack(attack);
+    }
+
+    if (normalize_potentiometer(g_conf.potentiometer_d, &decay)) {
+        update_decay(decay);
+    }
+
+    if (normalize_potentiometer(g_conf.potentiometer_s, &sustain)) {
+        update_sustain(sustain);
+    }
+
+    if (normalize_potentiometer(g_conf.potentiometer_r, &release)) {
+        update_release(release);
+    }
 
     if (normalize_potentiometer(g_conf.potentiometer, &frequency)) {
         update_lfo_depth(frequency);
@@ -519,16 +536,66 @@ void update() {
         update_lfo_frequency(distance);
     }
 
+    /* Chords for Nangs by Tame Impala for demo */
+
     if (g_conf.button_1 == 1) {
-        note_off(48 +12);
-        note_off(52 +12);
-        note_off(55 +12);
-        note_off(59 +12);
+        note_off(60);
+        note_off(64);
+        note_off(67);
+        note_off(71);
     } else {
-        note_on(48 +12);
-        note_on(52 +12);
-        note_on(55 +12);
-        note_on(59 +12);
+        note_on(60);
+        note_on(64);
+        note_on(67);
+        note_on(71);
+    }
+
+    if (g_conf.button_2 == 1) {
+        note_off(57);
+        note_off(60);
+        note_off(64);
+        note_off(67);
+    } else {
+        note_on(57);
+        note_on(60);
+        note_on(64);
+        note_on(67);
+    }
+
+    if (g_conf.button_3 == 1) {
+        note_off(62);
+        note_off(65);
+        note_off(69);
+        note_off(72);
+    } else {
+        note_on(62);
+        note_on(65);
+        note_on(69);
+        note_on(72);
+    }
+
+    if (g_conf.button_4 == 1) {
+        note_off(55);
+        note_off(59);
+        note_off(62);
+        note_off(65);
+    } else {
+        note_on(55);
+        note_on(59);
+        note_on(62);
+        note_on(65);
+    }
+
+    if (g_conf.button_5 == 1) {
+        note_off(65);
+        note_off(69);
+        note_off(72);
+        note_off(76);
+    } else {
+        note_on(65);
+        note_on(69);
+        note_on(72);
+        note_on(76);
     }
 }
 
@@ -694,7 +761,7 @@ static ma_node_vtable g_polyNodeVTable = {
     0
 };
 
-static void tremolo_node_process_pcm_frames(
+static void lfo_node_process_pcm_frames(
     ma_node* pNode,
     const float** ppFramesIn,
     ma_uint32* pFrameCountIn,
@@ -729,7 +796,7 @@ static void tremolo_node_process_pcm_frames(
 }
 
 static ma_node_vtable g_tremoloNodeVTable = {
-    tremolo_node_process_pcm_frames,
+    lfo_node_process_pcm_frames,
     NULL,
     1,
     1,
