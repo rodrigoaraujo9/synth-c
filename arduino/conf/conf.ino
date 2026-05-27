@@ -1,4 +1,11 @@
+#include <LiquidCrystal.h>
+#include <cstdio>
 #include <stdint.h>
+
+/*-----------------------------------------------------------------------------------------------------------*/
+
+/* Types and Defines */
+
 #define PACKET_START 0xAA
 #define PACKET_END 0x55
 
@@ -14,11 +21,12 @@ typedef struct __attribute__((packed)) {
 
 } Packet;
 
-Packet conf;
+/*-----------------------------------------------------------------------------------------------------------*/
+
+/* Wiring */
 
 const int wave_buttonPin = 49;
-
-const int buttonPins[5] = {2, 3, 4, 5, 6};
+const int buttonPins[5] = {22, 23, 24, 25, 26};
 
 const int potPins[5] = {A15, A11, A12, A13, A14};
 
@@ -28,15 +36,34 @@ const int y_pin = A1;
 const int trigPin = 52;
 const int echoPin = 53;
 
+const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+
+/*-----------------------------------------------------------------------------------------------------------*/
+
+/* Constants */
+
+const unsigned long debounce_delay = 50; // milliseconds
+
+/*-----------------------------------------------------------------------------------------------------------*/
+
+/* Globals */
+
+Packet conf;
+
 float duration, distance;
 
-uint8_t last_button_state[5];            // LOW | HIGH
-unsigned long last_debounce_time[5];     // milliseconds
-const unsigned long debounce_delay = 50; // milliseconds
+uint8_t last_button_state[5];        // LOW | HIGH
+unsigned long last_debounce_time[5]; // milliseconds
 
 uint8_t wav_button_state;             // LOW | HIGH
 uint8_t last_wav_button_state;        // LOW | HIGH
 unsigned long last_wav_debounce_time; // milliseconds
+
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+
+/*-----------------------------------------------------------------------------------------------------------*/
+
+/* Helper Functions */
 
 uint8_t checksum(Packet *p) {
 
@@ -53,6 +80,30 @@ uint8_t checksum(Packet *p) {
 }
 
 void toggle_waveform() { conf.waveform = (conf.waveform + 1) % 4; }
+
+void print_waveform() {
+  switch (conf.waveform) {
+  case 0:
+    lcd.print("Sine");
+    return;
+  case 1:
+    lcd.print("Square");
+    return;
+  case 2:
+    lcd.print("Triangle");
+    return;
+  case 3:
+    lcd.print("Sawtooth");
+    return;
+  default:
+    lcd.print("Error");
+    return;
+  }
+}
+
+/*-----------------------------------------------------------------------------------------------------------*/
+
+/* Main Functions */
 
 void setup() {
   pinMode(trigPin, OUTPUT);
@@ -71,6 +122,16 @@ void setup() {
   wav_button_state = LOW;
   last_wav_button_state = 0;
   last_wav_debounce_time = 0;
+
+  lcd.begin(16, 2);
+
+  lcd.display();
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Waveform:");
+  lcd.setCursor(0, 1);
+  print_waveform();
 
   Serial.begin(9600);
 }
@@ -106,20 +167,14 @@ void loop() {
       last_debounce_time[i] = millis();
     }
 
-    if (((millis() - last_wav_debounce_time) > debounce_delay) &&
-        reading != wav_button_state) {
-
-      wav_button_state = reading;
-
-      if (wav_button_state == HIGH) {
-        toggle_waveform();
-      }
+    if ((millis() - last_debounce_time[i]) > debounce_delay) {
+      conf.buttons[i] = reading;
     }
 
     last_button_state[i] = reading;
   }
 
-  uint8_t reading = !digitalRead(wav_buttonPin);
+  uint8_t reading = !digitalRead(wave_buttonPin);
 
   if (reading != last_wav_button_state) {
     last_wav_debounce_time = millis();
@@ -129,6 +184,13 @@ void loop() {
       reading != wav_button_state) {
 
     toggle_waveform();
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Wave:");
+    lcd.setCursor(0, 1);
+    print_waveform();
+
     wav_button_state = reading;
   }
 
