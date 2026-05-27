@@ -154,6 +154,7 @@ typedef struct {
 
 typedef struct __attribute__((packed)) {
   uint8_t start;
+  uint8_t waveform;
   int16_t potentiometers[5]; // LFO depth | Attack | Decay | Sustain | Release
   int16_t joystick[2];       // x | y
   float ultrasonic;
@@ -435,6 +436,12 @@ int normalize_ultrasonic(ma_float in, ma_float *out)
 
 /* Update */
 
+/// Updates waveform from a non-normalized input.
+void update_waveform(uint8_t in) {
+    Event event = {SET_LFO_FREQUENCY, in};
+    push_event(&event);
+}
+
 /// Updates LFO frequency from a normalized input [0..1].
 void update_lfo_frequency(ma_float in) {
     ma_float value = LFO_FREQUENCY_MIN + in * (LFO_FREQUENCY_MAX - LFO_FREQUENCY_MIN);
@@ -501,6 +508,10 @@ void update_release(ma_float in) {
 /// Translates controller input into parameter updates.
 void update() {
     ma_float attack, decay, sustain, release, frequency, distance, x, y;
+
+    if (g_conf.waveform > 3 || g_conf.waveform < 0) {
+        update_waveform(g_conf.waveform);
+    }
 
     if (normalize_potentiometer(g_conf.potentiometers[0], &frequency)) {
         update_lfo_depth(frequency);
