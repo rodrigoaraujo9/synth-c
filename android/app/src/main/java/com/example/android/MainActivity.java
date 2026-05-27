@@ -8,32 +8,23 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.media3.common.MediaItem;
 import androidx.media3.exoplayer.ExoPlayer;
 
+import java.net.SocketException;
+import java.net.UnknownHostException;
+
 public class MainActivity extends AppCompatActivity {
-
-    private ExoPlayer player;
-
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        player = new ExoPlayer.Builder(this).build();
-
-        String streamUrl = "udp://10.0.2.2:3000";
-
-        MediaItem mediaItem = MediaItem.fromUri(
-                Uri.parse(streamUrl)
-        );
-
-        player.setMediaItem(mediaItem);
-        player.prepare();
-        player.play();
+        try {
+            Client client = new Client(3000);
+            client.start();
+        } catch (SocketException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
     protected void onDestroy() {
-        if (player != null) {
-            player.release();
-        }
         super.onDestroy();
     }
 }

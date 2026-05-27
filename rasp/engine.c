@@ -18,7 +18,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-
+#include <netdb.h>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -697,50 +697,90 @@ void *poll_conf(void *arg) {
 }
 
 void *send_audio_udp(void *arg) {
-    struct sockaddr_in addr;
-    int addrlen, sock, cnt;
-    struct ip_mreq mreq;
+    int sockfd; /* socket */
+    int clientlen; /* byte size of client's address */
+    struct sockaddr_in serveraddr; /* server's addr */
+    struct sockaddr_in clientaddr; /* client addr */
+    struct hostent *hostp; /* client host info */
+    char *hostaddrp; /* dotted decimal host addr string */
+    int optval; /* flag value for setsockopt */
+    int n; /* message byte size */
+    char buf[1000]; /* connection request message byte size */
 
-    // set up socket
-    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    /*
+    * socket: create the parent socket
+    */
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0)
+      printf("ERROR opening socket");
 
-    if (sock < 0) {
-        printf("Error openning the socket.");
-        return NULL;
-    }
+    /* setsockopt: Handy debugging trick that lets
+    * us rerun the server immediately after we kill it;
+    * otherwise we have to wait about 20 secs.
+    * Eliminates "ERROR on binding: Address already in use" error.
+    */
+    optval = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval , sizeof(int));
 
-    bzero((char *)&addr, sizeof(addr));
+    /*
+    * build the server's Internet address
+    */
+    bzero((char *) &serveraddr, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serveraddr.sin_port = htons((unsigned short)PORT);
 
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);
-    addr.sin_addr.s_addr = inet_addr(GROUP);
+    /*
+    * bind: associate the parent socket with a port
+    */
+    if (bind(sockfd, (struct sockaddr *) &serveraddr,
+	   sizeof(serveraddr)) < 0)
+      printf("ERROR on binding");
 
-    addrlen = sizeof(addr);
+    /*
+    * main loop: wait for a datagram, then echo it
+    */
+    clientlen = sizeof(clientaddr);
+    while (1) {
+        /*
+        * recvfrom: receive a UDP datagram from a client
+        */
+        bzero(buf, 1000);
+        n = recvfrom(sockfd, buf, 1000, 0,
+            (struct sockaddr *) &clientaddr, &clientlen);
+        if (n < 0) printf("ERROR in recvfrom");
 
-    int ttl = 1;
-    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+        /*
+        * gethostbyaddr: determine who sent the datagram
+        */
+        hostp = gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr, sizeof(clientaddr.sin_addr.s_addr), AF_INET);
+        if (hostp == NULL) printf("ERROR on gethostbyaddr");
 
-    // send the audio
-    for (;;) {
-        void* readBuffer;
-        ma_uint32 frames_to_read = 480;
+        hostaddrp = inet_ntoa(clientaddr.sin_addr);
+        if (hostaddrp == NULL) printf("ERROR on inet_ntoa\n");
 
-        if (ma_pcm_rb_acquire_read(&g_udpBuf, &frames_to_read, (void**)&readBuffer) == MA_SUCCESS) {
-            size_t bytes = frames_to_read * CHANNELS * sizeof(float);
+        printf("server received datagram from %s (%s)\n", hostp->h_name, hostaddrp);
+        printf("server received %d/%d bytes: %s\n", strlen(buf), n, buf);
 
-            if (frames_to_read > 0) {
-                sendto(sock, readBuffer, bytes, 0,
-                       (struct sockaddr*)&addr, addrlen);
-            } else {
-                usleep(1000);
+        for (;;) {
+            void* readBuffer;
+            ma_uint32 frames_to_read = 480;
+
+            if (ma_pcm_rb_acquire_read(&g_udpBuf, &frames_to_read, (void**)&readBuffer) == MA_SUCCESS) {
+                size_t bytes = frames_to_read * CHANNELS * sizeof(float);
+
+                if (frames_to_read > 0) {
+                    sendto(sockfd, readBuffer, bytes, 0,
+                        (struct sockaddr*)&clientaddr, clientlen);
+                } else {
+                    usleep(1000);
+                }
+
+                ma_pcm_rb_commit_read(&g_udpBuf, frames_to_read);
             }
-
-            ma_pcm_rb_commit_read(&g_udpBuf, frames_to_read);
         }
     }
 }
-
-
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Node Graph */
@@ -1056,7 +1096,6 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
     if (ma_pcm_rb_acquire_write(&g_udpBuf, &frames_to_write, (void**)&write_buffer) == MA_SUCCESS) {
         MA_COPY_MEMORY(write_buffer, pOutput, frames_to_write * CHANNELS * sizeof(float));
         ma_pcm_rb_commit_write(&g_udpBuf, frames_to_write);
-        printf("copying...");
     }
 
     (void)pInput;
