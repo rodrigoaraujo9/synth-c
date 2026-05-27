@@ -29,8 +29,6 @@ public class Client extends Thread {
 
     @Override
     public void run() {
-        Log.d("CLIENT", "thread started");
-
         int minBuf = AudioTrack.getMinBufferSize(
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_OUT_STEREO,
@@ -67,7 +65,7 @@ public class Client extends Thread {
                 socket.receive(packet);
 
                 int bytesReceived = packet.getLength();
-                
+
                 int floatCount = bytesReceived / 4;
                 float[] floatBuffer = new float[floatCount];
 
@@ -77,9 +75,6 @@ public class Client extends Thread {
                         .get(floatBuffer);
 
                 audioTrack.write(floatBuffer, 0, floatCount, AudioTrack.WRITE_BLOCKING);
-
-                Log.d("CLIENT", "received " + bytesReceived + " bytes / " + floatCount + " floats");
-
             } catch (IOException e) {
                 Log.e("CLIENT", "receive failed", e);
             }
