@@ -14,6 +14,11 @@
 #include <sys/ioctl.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <sys/types.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -25,6 +30,10 @@
 
 /* Config */
 
+// Comm
+#define PORT 3000
+#define GROUP "239.0.0.1"
+
 // Packet
 #define PACKET_START 0xAA
 #define PACKET_END 0x55
@@ -33,6 +42,7 @@
 #define FORMAT ma_format_f32
 #define CHANNELS 2
 #define SAMPLE_RATE 48000
+#define BUFFER_SIZE 2048
 
 // Effect Properties
 #define LPF_ORDER 8 // how agressive freqs beyond cuttof are attenuated (8 is very agressive)
@@ -74,7 +84,6 @@
 
 #define HPF_CUTOFF_MAX 4000.0f
 #define HPF_CUTOFF_MIN 20.0f
-
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -182,6 +191,7 @@ static ma_node_base g_polyNode;
 static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
 
+static ma_pcm_rb g_udpBuf;
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -686,6 +696,48 @@ void *poll_conf(void *arg) {
     }
 }
 
+void *send_audio_udp(void *arg) {
+    struct sockaddr_in addr;
+    int addrlen, sock, cnt;
+    struct ip_mreq mreq;
+
+    // set up socket
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+
+    if (sock < 0) {
+        printf("Error openning the socket.");
+        return NULL;
+    }
+
+    bzero((char *)&addr, sizeof(addr));
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = inet_addr(GROUP);
+
+    addrlen = sizeof(addr);
+
+    int ttl = 1;
+    setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+
+    // send the audio
+    for (;;) {
+        void* readBuffer;
+        ma_uint32 frames_to_read = SAMPLE_RATE * 2;
+
+        if (ma_pcm_rb_acquire_read(&g_udpBuf, &frames_to_read, (void**)&readBuffer) == MA_SUCCESS) {
+            size_t bytes = frames_to_read * CHANNELS * sizeof(float);
+
+            if (frames_to_read > 0) {
+                sendto(sock, readBuffer, bytes, 0,
+                       (struct sockaddr*)&addr, addrlen);
+            }
+
+            ma_pcm_rb_commit_read(&g_udpBuf, frames_to_read);
+        }
+    }
+}
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -995,6 +1047,16 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
     }
 
     ma_node_graph_read_pcm_frames(&g_nodeGraph, pOutput, frameCount, NULL);
+
+    void *write_buffer;
+    ma_uint32 frames_to_write = frameCount;
+
+    if (ma_pcm_rb_acquire_write(&g_udpBuf, &frames_to_write, (void**)&write_buffer) == MA_SUCCESS) {
+        MA_COPY_MEMORY(write_buffer, pOutput, frames_to_write * CHANNELS * sizeof(float));
+        ma_pcm_rb_commit_write(&g_udpBuf, frames_to_write);
+        printf("copying...");
+    }
+
     (void)pInput;
 }
 
@@ -1003,11 +1065,19 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
 /* Main */
 
 int main(void) {
+
+
     ma_result result;
 
     result = ma_rb_init(sizeof(g_eventBufStore), g_eventBufStore, NULL, &g_eventBuf);
     if (result != MA_SUCCESS) {
         printf("*error* failed to initialize event ring buffer.\n");
+        return -1;
+    }
+
+    result = ma_pcm_rb_init(FORMAT, CHANNELS, 2 * SAMPLE_RATE, NULL, NULL, &g_udpBuf);
+    if (result != MA_SUCCESS) {
+        printf("*error* failed to initialize udp ring buffer.\n");
         return -1;
     }
 
@@ -1137,6 +1207,7 @@ int main(void) {
         deviceConfig = ma_device_config_init(ma_device_type_playback);
         deviceConfig.playback.format = FORMAT;
         deviceConfig.playback.channels = CHANNELS;
+
         deviceConfig.sampleRate = SAMPLE_RATE;
         deviceConfig.dataCallback = data_callback;
         deviceConfig.pUserData = NULL;
@@ -1163,15 +1234,15 @@ int main(void) {
         // main
 
         // // A simple demo
-        // Event c3_on = { NOTE_PRESSED, 48 +12 };
-        // Event e3_on = { NOTE_PRESSED, 52 +12 };
-        // Event g3_on = { NOTE_PRESSED, 55 +12 };
-        // Event b3_on = { NOTE_PRESSED, 59 +12 };
+        Event c3_on = { NOTE_PRESSED, 48 +12 };
+        Event e3_on = { NOTE_PRESSED, 52 +12 };
+        Event g3_on = { NOTE_PRESSED, 55 +12 };
+        Event b3_on = { NOTE_PRESSED, 59 +12 };
 
-        // push_event(&c3_on);
-        // push_event(&e3_on);
-        // push_event(&g3_on);
-        // push_event(&b3_on);
+        push_event(&c3_on);
+        push_event(&e3_on);
+        push_event(&g3_on);
+        push_event(&b3_on);
 
         // sleep(2);
 
@@ -1187,6 +1258,9 @@ int main(void) {
 
         pthread_t conf_thread;
         pthread_create(&conf_thread, NULL, poll_conf, NULL);
+
+        pthread_t udp_thread;
+        pthread_create(&udp_thread, NULL, send_audio_udp, NULL);
 
         printf("*info* press enter to quit...\n");
         getchar();
