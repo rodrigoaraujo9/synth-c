@@ -540,7 +540,7 @@ void update() {
 
     /* Chords for Nangs by Tame Impala for demo */
 
-    if (g_conf.buttons[0] == 1) {
+    if (g_conf.buttons[0] == 0) {
         note_off(60);
         note_off(64);
         note_off(67);
@@ -552,7 +552,7 @@ void update() {
         note_on(71);
     }
 
-    if (g_conf.buttons[1] == 1) {
+    if (g_conf.buttons[1] == 0) {
         note_off(57);
         note_off(60);
         note_off(64);
@@ -564,7 +564,7 @@ void update() {
         note_on(67);
     }
 
-    if (g_conf.buttons[2] == 1) {
+    if (g_conf.buttons[2] == 0) {
         note_off(62);
         note_off(65);
         note_off(69);
@@ -576,7 +576,7 @@ void update() {
         note_on(72);
     }
 
-    if (g_conf.buttons[3] == 1) {
+    if (g_conf.buttons[3] == 0) {
         note_off(55);
         note_off(59);
         note_off(62);
@@ -588,7 +588,7 @@ void update() {
         note_on(65);
     }
 
-    if (g_conf.buttons[4] == 1) {
+    if (g_conf.buttons[4] == 0) {
         note_off(65);
         note_off(69);
         note_off(72);

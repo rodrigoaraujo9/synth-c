@@ -27,6 +27,10 @@ const int echoPin = 53;
 
 float duration, distance;
 
+uint8_t last_button_state[5];            // LOW | HIGH
+unsigned long last_debounce_time[5];     // milliseconds
+const unsigned long debounce_delay = 50; // milliseconds
+
 uint8_t checksum(Packet *p) {
 
   uint8_t *data = (uint8_t *)p;
@@ -44,11 +48,13 @@ uint8_t checksum(Packet *p) {
 void setup() {
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
-  pinMode(button_1_pin, INPUT_PULLUP);
-  pinMode(button_2_pin, INPUT);
-  pinMode(button_3_pin, INPUT);
-  pinMode(button_4_pin, INPUT);
-  pinMode(button_5_pin, INPUT);
+
+  for (int i = 0; i < 5; i++) {
+    pinMode(buttonPins[i], INPUT_PULLUP);
+    last_button_state[i] = LOW;
+    last_debounce_time[i] = 0;
+    conf.buttons[i] = 0;
+  }
 
   Serial.begin(9600);
 }
@@ -78,7 +84,19 @@ void loop() {
   conf.ultrasonic = distance;
 
   for (int i = 0; i < 5; i++) {
-    conf.buttons[i] = !digitalRead(buttonPins[i]);
+    uint8_t reading = !digitalRead(buttonPins[i]);
+
+    if (reading != last_button_state[i]) {
+      last_debounce_time[i] = millis();
+    }
+
+    if (((millis() - last_debounce_time[i]) > debounce_delay) &&
+        reading != conf.buttons[i]) {
+
+      conf.buttons[i] = reading;
+    }
+
+    last_button_state[i] = reading;
   }
 
   conf.checksum = checksum(&conf);
