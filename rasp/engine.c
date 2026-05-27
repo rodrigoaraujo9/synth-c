@@ -154,19 +154,12 @@ typedef struct {
 
 typedef struct __attribute__((packed)) {
   uint8_t start;
-  int32_t potentiometer;
-  int32_t potentiometer_a;
-  int32_t potentiometer_d;
-  int32_t potentiometer_s;
-  int32_t potentiometer_r;
-  int32_t joystick_x;
-  int32_t joystick_y;
-  int32_t ultrasonic;
-  int32_t button_1;
-  int32_t button_2;
-  int32_t button_3;
-  int32_t button_4;
-  int32_t button_5;
+  uint8_t waveform;
+  int16_t potentiometers[5]; // LFO depth | Attack | Decay | Sustain | Release
+  int16_t joystick[2];       // x | y
+  float ultrasonic;
+  uint8_t buttons[5];
+  uint8_t checksum;
   uint8_t end;
 } Packet;
 
@@ -443,6 +436,12 @@ int normalize_ultrasonic(ma_float in, ma_float *out)
 
 /* Update */
 
+/// Updates waveform from a non-normalized input.
+void update_waveform(uint8_t in) {
+    Event event = {SET_LFO_FREQUENCY, in};
+    push_event(&event);
+}
+
 /// Updates LFO frequency from a normalized input [0..1].
 void update_lfo_frequency(ma_float in) {
     ma_float value = LFO_FREQUENCY_MIN + in * (LFO_FREQUENCY_MAX - LFO_FREQUENCY_MIN);
@@ -510,27 +509,31 @@ void update_release(ma_float in) {
 void update() {
     ma_float attack, decay, sustain, release, frequency, distance, x, y;
 
-    if (normalize_potentiometer(g_conf.potentiometer_a, &attack)) {
-        update_attack(attack);
+    if (g_conf.waveform > 3 || g_conf.waveform < 0) {
+        update_waveform(g_conf.waveform);
     }
 
-    if (normalize_potentiometer(g_conf.potentiometer_d, &decay)) {
-        update_decay(decay);
-    }
-
-    if (normalize_potentiometer(g_conf.potentiometer_s, &sustain)) {
-        update_sustain(sustain);
-    }
-
-    if (normalize_potentiometer(g_conf.potentiometer_r, &release)) {
-        update_release(release);
-    }
-
-    if (normalize_potentiometer(g_conf.potentiometer, &frequency)) {
+    if (normalize_potentiometer(g_conf.potentiometers[0], &frequency)) {
         update_lfo_depth(frequency);
     }
 
-    if (normalize_joystick(g_conf.joystick_x, g_conf.joystick_y, &x, &y)) {
+    if (normalize_potentiometer(g_conf.potentiometers[1], &attack)) {
+        update_attack(attack);
+    }
+
+    if (normalize_potentiometer(g_conf.potentiometers[2], &decay)) {
+        update_decay(decay);
+    }
+
+    if (normalize_potentiometer(g_conf.potentiometers[3], &sustain)) {
+        update_sustain(sustain);
+    }
+
+    if (normalize_potentiometer(g_conf.potentiometers[4], &release)) {
+        update_release(release);
+    }
+
+    if (normalize_joystick(g_conf.joystick[0], g_conf.joystick[1], &x, &y)) {
         if (x <= 0.5) {
             update_lpf_cutoff((0.5f - x) * 2.0f);
             update_hpf_cutoff(0.0f);
@@ -548,7 +551,7 @@ void update() {
 
     /* Chords for Nangs by Tame Impala for demo */
 
-    if (g_conf.button_1 == 1) {
+    if (g_conf.buttons[0] == 0) {
         note_off(60);
         note_off(64);
         note_off(67);
@@ -560,7 +563,7 @@ void update() {
         note_on(71);
     }
 
-    if (g_conf.button_2 == 1) {
+    if (g_conf.buttons[1] == 0) {
         note_off(57);
         note_off(60);
         note_off(64);
@@ -572,7 +575,7 @@ void update() {
         note_on(67);
     }
 
-    if (g_conf.button_3 == 1) {
+    if (g_conf.buttons[2] == 0) {
         note_off(62);
         note_off(65);
         note_off(69);
@@ -584,7 +587,7 @@ void update() {
         note_on(72);
     }
 
-    if (g_conf.button_4 == 1) {
+    if (g_conf.buttons[3] == 0) {
         note_off(55);
         note_off(59);
         note_off(62);
@@ -596,7 +599,7 @@ void update() {
         note_on(65);
     }
 
-    if (g_conf.button_5 == 1) {
+    if (g_conf.buttons[4] == 0) {
         note_off(65);
         note_off(69);
         note_off(72);
@@ -612,6 +615,20 @@ void update() {
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Communication */
+
+uint8_t checksum(Packet *p) {
+
+  uint8_t *data = (uint8_t *)p;
+
+  uint8_t sum = 0;
+
+  // checksum and end byte are excluded
+  for (size_t i = 0; i < sizeof(Packet) - 2; i++) {
+    sum ^= data[i];
+  }
+
+  return sum;
+}
 
 int read_packet(int sfd, Packet *out) {
     uint8_t byte;
@@ -635,7 +652,9 @@ int read_packet(int sfd, Packet *out) {
         received += n;
     }
 
-    if (out->end != PACKET_END) return 0;
+    // Verify integrity of the packet
+
+    if (out->end != PACKET_END || out->start != PACKET_START || out->checksum != checksum(out)) return 0;
 
     return 1;
 }
@@ -688,9 +707,6 @@ void *poll_conf(void *arg) {
         }
 
         g_conf = packet;
-
-        //debug
-        printf("pot=%d x=%d y=%d, but=%d, dist=%d\n", g_conf.potentiometer, g_conf.joystick_x, g_conf.joystick_y, g_conf.button_1, g_conf.ultrasonic);
 
         update();
     }
