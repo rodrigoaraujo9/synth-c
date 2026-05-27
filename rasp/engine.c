@@ -723,7 +723,7 @@ void *send_audio_udp(void *arg) {
     // send the audio
     for (;;) {
         void* readBuffer;
-        ma_uint32 frames_to_read = SAMPLE_RATE * 2;
+        ma_uint32 frames_to_read = 480;
 
         if (ma_pcm_rb_acquire_read(&g_udpBuf, &frames_to_read, (void**)&readBuffer) == MA_SUCCESS) {
             size_t bytes = frames_to_read * CHANNELS * sizeof(float);
@@ -731,6 +731,8 @@ void *send_audio_udp(void *arg) {
             if (frames_to_read > 0) {
                 sendto(sock, readBuffer, bytes, 0,
                        (struct sockaddr*)&addr, addrlen);
+            } else {
+                usleep(1000);
             }
 
             ma_pcm_rb_commit_read(&g_udpBuf, frames_to_read);
