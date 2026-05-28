@@ -1,0 +1,19 @@
+CC = clang
+CFLAGS =
+LDFLAGS = -framework CoreAudio -framework AudioToolbox -framework CoreFoundation -lpthread -lm
+
+TARGET = synth
+SRC = engine.c
+
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(SRC) -o $(TARGET) $(CFLAGS) $(LDFLAGS)
+
+run: $(TARGET)
+	./$(TARGET)
+
+clean:
+	rm -f $(TARGET)
+
+.PHONY: all run clean
