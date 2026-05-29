@@ -512,13 +512,11 @@ void add_note(uint8_t notes[MAX_NOTES], ma_uint32 note) {
 }
 
 /// Updades envelopes to accomodate the current active notes.
-/// Updades envelopes to accomodate the current active notes.
 void update_envelopes() {
     uint8_t new_notes[MAX_NOTES] = {0};
 
     /* Chords for Idioteque by Radiohead for demo */
 
-    // // Button 0: Gm6/D = D - G - Bb - E
     // if (g_conf.buttons[0] != 0) {
     //     add_note(new_notes, 50); // D3
     //     add_note(new_notes, 55); // G3
@@ -526,7 +524,6 @@ void update_envelopes() {
     //     add_note(new_notes, 64); // E4
     // }
 
-    // // Button 1: Ebmaj9 = Eb - Bb - D - F - G - Bb - D
     // if (g_conf.buttons[1] != 0) {
     //     add_note(new_notes, 51); // Eb3
     //     add_note(new_notes, 58); // Bb3
@@ -537,7 +534,6 @@ void update_envelopes() {
     //     add_note(new_notes, 74); // D5
     // }
 
-    // // Button 2: Gm = G - D - Bb - D
     // if (g_conf.buttons[2] != 0) {
     //     add_note(new_notes, 43); // G2
     //     add_note(new_notes, 50); // D3
@@ -545,7 +541,6 @@ void update_envelopes() {
     //     add_note(new_notes, 62); // D4
     // }
 
-    // // Button 3: Ebmaj9 = Eb - Bb - D - F - G
     // if (g_conf.buttons[3] != 0) {
     //     add_note(new_notes, 39); // Eb2
     //     add_note(new_notes, 46); // Bb2
@@ -554,7 +549,6 @@ void update_envelopes() {
     //     add_note(new_notes, 55); // G3
     // }
 
-    // // Button 4: optional higher Gm6/D = D - G - Bb - E
     // if (g_conf.buttons[4] != 0) {
     //     add_note(new_notes, 62); // D4
     //     add_note(new_notes, 67); // G4
@@ -565,41 +559,41 @@ void update_envelopes() {
 
     /* Chords for Nangs by Tame Impala */
 
-    Button 0: Cmaj7
     if (g_conf.buttons[0] != 0) {
+        add_note(new_notes, 81-12-12);
         add_note(new_notes, 60-12); // C
         add_note(new_notes, 64-12); // E
         add_note(new_notes, 67-12); // G
         add_note(new_notes, 71-12); // B
     }
 
-    // Button 1: Dm7/G
     if (g_conf.buttons[1] != 0) {
-        add_note(new_notes, 67-12); // G
-        add_note(new_notes, 72-12); // C
-        add_note(new_notes, 74-12); // D
-        add_note(new_notes, 77-12); // F
-        add_note(new_notes, 81-12); // A
+        add_note(new_notes, 67-12-12); // G
+        add_note(new_notes, 67-12);    // G
+        add_note(new_notes, 72-12);    // C
+        add_note(new_notes, 74-12);    // D
+        add_note(new_notes, 77-12);    // F
+        add_note(new_notes, 81-12);    // A
     }
 
-    // Button 2: Cmaj7
     if (g_conf.buttons[2] != 0) {
+        add_note(new_notes, 81-12-12);
         add_note(new_notes, 60-12); // C
         add_note(new_notes, 64-12); // E
         add_note(new_notes, 67-12); // G
         add_note(new_notes, 71-12); // B
     }
 
-    // Button 3: Ebmaj7
     if (g_conf.buttons[3] != 0) {
-        add_note(new_notes, 63-12); // Eb
-        add_note(new_notes, 67-12); // G
-        add_note(new_notes, 70-12); // Bb
-        add_note(new_notes, 74-12); // D
+        add_note(new_notes, 63-12-12); // Eb
+        add_note(new_notes, 63-12);    // Eb
+        add_note(new_notes, 67-12);    // G
+        add_note(new_notes, 70-12);    // Bb
+        add_note(new_notes, 74-12);    // D
     }
 
-    // Button 4: Abmaj9
     if (g_conf.buttons[4] != 0) {
+        add_note(new_notes, 68-12-12); // Ab
         add_note(new_notes, 68-12); // Ab
         add_note(new_notes, 72-12); // C
         add_note(new_notes, 75-12); // Eb
@@ -1348,29 +1342,6 @@ int main(void) {
         emscripten_set_main_loop(main_loop__em, 0, 1);
     #else
         // main
-
-        // A simple demo
-        // Event c3_on = { NOTE_PRESSED, 48 +12 };
-        // Event e3_on = { NOTE_PRESSED, 52 +12 };
-        // Event g3_on = { NOTE_PRESSED, 55 +12 };
-        // Event b3_on = { NOTE_PRESSED, 59 +12 };
-
-        // push_event(&c3_on);
-        // push_event(&e3_on);
-        // push_event(&g3_on);
-        // push_event(&b3_on);
-
-        // sleep(2);
-
-        // Event c3_off = { NOTE_RELEASED, 48 +12 };
-        // Event e3_off = { NOTE_RELEASED, 52 +12 };
-        // Event g3_off = { NOTE_RELEASED, 55 +12 };
-        // Event b3_off = { NOTE_RELEASED, 59 +12 };
-
-        // push_event(&c3_off);
-        // push_event(&e3_off);
-        // push_event(&g3_off);
-        // push_event(&b3_off);
 
         pthread_t conf_thread;
         pthread_create(&conf_thread, NULL, poll_conf, NULL);
