@@ -838,7 +838,6 @@ void *send_audio_udp(void *arg) {
         hostaddrp = inet_ntoa(clientaddr.sin_addr);
         if (hostaddrp == NULL) printf("ERROR on inet_ntoa\n");
 
-        printf("server received datagram from %s (%s)\n", hostp->h_name, hostaddrp);
         printf("server received %d/%d bytes: %s\n", strlen(buf), n, buf);
 
         for (;;) {
@@ -847,11 +846,6 @@ void *send_audio_udp(void *arg) {
 
             if (ma_pcm_rb_acquire_read(&g_udpBuf, &frames_to_read, (void**)&readBuffer) == MA_SUCCESS) {
                 size_t bytes = frames_to_read * CHANNELS * sizeof(float);
-
-                if (readBuffer == NULL || frames_to_read == 0) {
-                    printf("invalid ring buffer state\n");
-                    continue;
-                }
 
                 if (frames_to_read > 0) {
                     sendto(sockfd, readBuffer, bytes, 0,
