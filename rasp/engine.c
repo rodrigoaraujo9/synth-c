@@ -509,7 +509,7 @@ void update_release(ma_float in) {
 void update() {
     ma_float attack, decay, sustain, release, frequency, distance, x, y;
 
-    if (g_conf.waveform > 3 || g_conf.waveform < 0) {
+    if (g_conf.waveform < 3 || g_conf.waveform > 0) {
         update_waveform(g_conf.waveform);
     }
 
@@ -684,7 +684,7 @@ void *poll_conf(void *arg) {
     }
 
     cfmakeraw(&options);
-    cfsetspeed(&options, 9600);
+    cfsetspeed(&options, 115200);
 
     options.c_cflag &= ~CSTOPB;
     options.c_cflag |= CLOCAL;
@@ -710,6 +710,9 @@ void *poll_conf(void *arg) {
         }
 
         g_conf = packet;
+
+        printf("joystick: %d, %d, pot: %d, ultra: %f, adsr: %d, %d, %d, %d, buttons: %d, %d, %d, %d\n", g_conf.joystick[0], g_conf.joystick[1], g_conf.potentiometers[0], g_conf.ultrasonic, g_conf.potentiometers[1], g_conf.potentiometers[2], g_conf.potentiometers[3], g_conf.potentiometers[4], g_conf.buttons[0], g_conf.buttons[1], g_conf.buttons[2], g_conf.buttons[3]);
+
 
         update();
     }
@@ -984,7 +987,7 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             case SET_RELEASE: {
                 ma_float release = event_value_as_float(event.value);
 
-                if (release > SET_RELEASE || release < SET_RELEASE) {
+                if (release > RELEASE_MAX || release < RELEASE_MIN) {
                     printf("*error* out of bounds release value on SET_RELEASE event");
                     break;
                 }
@@ -1145,7 +1148,7 @@ int main(void) {
 
     ma_atomic_float_set(&g_state.attack,  0.5f);
     ma_atomic_float_set(&g_state.decay,   0.1f);
-    ma_atomic_float_set(&g_state.sustain, 0.8f);
+    ma_atomic_float_set(&g_state.sustain, 1.0f);
     ma_atomic_float_set(&g_state.release, 1.0f);
 
     for (int i = 0; i < MAX_NOTES; i++) {
@@ -1292,6 +1295,8 @@ int main(void) {
         emscripten_set_main_loop(main_loop__em, 0, 1);
     #else
         // main
+        //
+        sleep(2);
 
         // A simple demo
         Event c3_on = { NOTE_PRESSED, 48 +12 };
