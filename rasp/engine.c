@@ -172,7 +172,7 @@ static State g_state;
 static Packet g_conf;
 
 static ma_waveform g_waves[MAX_NOTES];
-
+static uint8_t g_active_notes[MAX_NOTES] = {0};
 static Envelope g_envelopes[MAX_NOTES];
 
 static ma_node_graph g_nodeGraph;
@@ -437,7 +437,7 @@ int normalize_ultrasonic(ma_float in, ma_float *out)
 
 /// Updates waveform from a non-normalized input.
 void update_waveform(uint8_t in) {
-    Event event = {SET_LFO_FREQUENCY, in};
+    Event event = {SET_WAVE, in};
     push_event(&event);
 }
 
@@ -504,6 +504,127 @@ void update_release(ma_float in) {
     push_event(&event);
 }
 
+/// Helper to make a note active safely.
+void add_note(uint8_t notes[MAX_NOTES], ma_uint32 note) {
+    if (note < MAX_NOTES) {
+        notes[note] = 1;
+    }
+}
+
+/// Updades envelopes to accomodate the current active notes.
+/// Updades envelopes to accomodate the current active notes.
+void update_envelopes() {
+    uint8_t new_notes[MAX_NOTES] = {0};
+
+    // /* Chords for Idioteque by Radiohead for demo */
+
+    // // Button 0: Gm6/D = D - G - Bb - E
+    // if (g_conf.buttons[0] != 0) {
+    //     add_note(new_notes, 50); // D3
+    //     add_note(new_notes, 55); // G3
+    //     add_note(new_notes, 58); // Bb3
+    //     add_note(new_notes, 64); // E4
+    // }
+
+    // // Button 1: Ebmaj9 = Eb - Bb - D - F - G - Bb - D
+    // if (g_conf.buttons[1] != 0) {
+    //     add_note(new_notes, 51); // Eb3
+    //     add_note(new_notes, 58); // Bb3
+    //     add_note(new_notes, 62); // D4
+    //     add_note(new_notes, 65); // F4
+    //     add_note(new_notes, 67); // G4
+    //     add_note(new_notes, 70); // Bb4
+    //     add_note(new_notes, 74); // D5
+    // }
+
+    // // Button 2: Gm = G - D - Bb - D
+    // if (g_conf.buttons[2] != 0) {
+    //     add_note(new_notes, 43); // G2
+    //     add_note(new_notes, 50); // D3
+    //     add_note(new_notes, 58); // Bb3
+    //     add_note(new_notes, 62); // D4
+    // }
+
+    // // Button 3: Ebmaj9 = Eb - Bb - D - F - G
+    // if (g_conf.buttons[3] != 0) {
+    //     add_note(new_notes, 39); // Eb2
+    //     add_note(new_notes, 46); // Bb2
+    //     add_note(new_notes, 50); // D3
+    //     add_note(new_notes, 53); // F3
+    //     add_note(new_notes, 55); // G3
+    // }
+
+    // // Button 4: optional higher Gm6/D = D - G - Bb - E
+    // if (g_conf.buttons[4] != 0) {
+    //     add_note(new_notes, 62); // D4
+    //     add_note(new_notes, 67); // G4
+    //     add_note(new_notes, 70); // Bb4
+    //     add_note(new_notes, 76); // E5
+    // }
+
+
+
+    /* Chords for Nangs by Tame Impala */
+
+    /* Chords for Nangs by Tame Impala */
+
+    // Button 0: Cmaj7
+    if (g_conf.buttons[0] != 0) {
+        add_note(new_notes, 60-12); // C
+        add_note(new_notes, 64-12); // E
+        add_note(new_notes, 67-12); // G
+        add_note(new_notes, 71-12); // B
+    }
+
+    // Button 1: Dm7/G
+    if (g_conf.buttons[1] != 0) {
+        add_note(new_notes, 67-12); // G
+        add_note(new_notes, 72-12); // C
+        add_note(new_notes, 74-12); // D
+        add_note(new_notes, 77-12); // F
+        add_note(new_notes, 81-12); // A
+    }
+
+    // Button 2: Cmaj7
+    if (g_conf.buttons[2] != 0) {
+        add_note(new_notes, 60-12); // C
+        add_note(new_notes, 64-12); // E
+        add_note(new_notes, 67-12); // G
+        add_note(new_notes, 71-12); // B
+    }
+
+    // Button 3: Ebmaj7
+    if (g_conf.buttons[3] != 0) {
+        add_note(new_notes, 63-12); // Eb
+        add_note(new_notes, 67-12); // G
+        add_note(new_notes, 70-12); // Bb
+        add_note(new_notes, 74-12); // D
+    }
+
+    // Button 4: Abmaj9
+    if (g_conf.buttons[4] != 0) {
+        add_note(new_notes, 68-12); // Ab
+        add_note(new_notes, 72-12); // C
+        add_note(new_notes, 75-12); // Eb
+        add_note(new_notes, 79-12); // G
+        add_note(new_notes, 82-12); // Bb
+    }
+
+    for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
+        if (new_notes[note] && !g_active_notes[note]) {
+            Event event = { NOTE_PRESSED, note };
+            push_event(&event);
+        }
+
+        if (!new_notes[note] && g_active_notes[note]) {
+            Event event = { NOTE_RELEASED, note };
+            push_event(&event);
+        }
+
+        g_active_notes[note] = new_notes[note];
+    }
+}
+
 /// Translates controller input into parameter updates.
 void update() {
     ma_float attack, decay, sustain, release, frequency, distance, x, y;
@@ -548,67 +669,7 @@ void update() {
         update_lfo_frequency(distance);
     }
 
-    /* Chords for Nangs by Tame Impala for demo */
-
-    if (g_conf.buttons[0] == 0) {
-        note_off(60);
-        note_off(64);
-        note_off(67);
-        note_off(71);
-    } else {
-        note_on(60);
-        note_on(64);
-        note_on(67);
-        note_on(71);
-    }
-
-    if (g_conf.buttons[1] == 0) {
-        note_off(57);
-        note_off(60);
-        note_off(64);
-        note_off(67);
-    } else {
-        note_on(57);
-        note_on(60);
-        note_on(64);
-        note_on(67);
-    }
-
-    if (g_conf.buttons[2] == 0) {
-        note_off(62);
-        note_off(65);
-        note_off(69);
-        note_off(72);
-    } else {
-        note_on(62);
-        note_on(65);
-        note_on(69);
-        note_on(72);
-    }
-
-    if (g_conf.buttons[3] == 0) {
-        note_off(55);
-        note_off(59);
-        note_off(62);
-        note_off(65);
-    } else {
-        note_on(55);
-        note_on(59);
-        note_on(62);
-        note_on(65);
-    }
-
-    if (g_conf.buttons[4] == 0) {
-        note_off(65);
-        note_off(69);
-        note_off(72);
-        note_off(76);
-    } else {
-        note_on(65);
-        note_on(69);
-        note_on(72);
-        note_on(76);
-    }
+    update_envelopes();
 }
 
 /* ------------------------------------------------------------------------------------------------------------- */
@@ -707,7 +768,7 @@ void *poll_conf(void *arg) {
 
         g_conf = packet;
 
-        printf("joystick: %d, %d, pot: %d, ultra: %f, adsr: %d, %d, %d, %d, buttons: %d, %d, %d, %d\n", g_conf.joystick[0], g_conf.joystick[1], g_conf.potentiometers[0], g_conf.ultrasonic, g_conf.potentiometers[1], g_conf.potentiometers[2], g_conf.potentiometers[3], g_conf.potentiometers[4], g_conf.buttons[0], g_conf.buttons[1], g_conf.buttons[2], g_conf.buttons[3]);
+        printf("joystick: %d, %d, pot: %d, ultra: %f, adsr: %d, %d, %d, %d, buttons: %d, %d, %d, %d, %d\n", g_conf.joystick[0], g_conf.joystick[1], g_conf.potentiometers[0], g_conf.ultrasonic, g_conf.potentiometers[1], g_conf.potentiometers[2], g_conf.potentiometers[3], g_conf.potentiometers[4], g_conf.buttons[0], g_conf.buttons[1], g_conf.buttons[2], g_conf.buttons[3], g_conf.buttons[4]);
 
 
         update();
