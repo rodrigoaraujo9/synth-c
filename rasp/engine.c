@@ -363,7 +363,6 @@ static inline ma_float envelope_step(ma_uint32 note, ma_float a, ma_float d, ma_
                 if (env->gain <= 0.0f) {
                     env->gain = 0.0f;
                     env->stage = IDLE;
-                    // when stops playing only then is note set to 0
                     ma_atomic_uint32_set(&g_state.keys[note], 0);
                 }
             }
@@ -654,10 +653,7 @@ int read_packet(int sfd, Packet *out) {
 
     // Verify integrity of the packet
 
-    // if (out->end != PACKET_END || out->start != PACKET_START || out->checksum != checksum(out)) return 0;
-
-    if (out->end != PACKET_END || out->start != PACKET_START) return 0;
-
+    if (out->end != PACKET_END || out->start != PACKET_START || out->checksum != checksum(out)) return 0;
 
     return 1;
 }
@@ -1299,15 +1295,15 @@ int main(void) {
         sleep(2);
 
         // A simple demo
-        Event c3_on = { NOTE_PRESSED, 48 +12 };
-        Event e3_on = { NOTE_PRESSED, 52 +12 };
-        Event g3_on = { NOTE_PRESSED, 55 +12 };
-        Event b3_on = { NOTE_PRESSED, 59 +12 };
+        // Event c3_on = { NOTE_PRESSED, 48 +12 };
+        // Event e3_on = { NOTE_PRESSED, 52 +12 };
+        // Event g3_on = { NOTE_PRESSED, 55 +12 };
+        // Event b3_on = { NOTE_PRESSED, 59 +12 };
 
-        push_event(&c3_on);
-        push_event(&e3_on);
-        push_event(&g3_on);
-        push_event(&b3_on);
+        // push_event(&c3_on);
+        // push_event(&e3_on);
+        // push_event(&g3_on);
+        // push_event(&b3_on);
 
         // sleep(2);
 
