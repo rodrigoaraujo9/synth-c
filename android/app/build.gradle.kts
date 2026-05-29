@@ -45,4 +45,6 @@ dependencies {
     androidTestImplementation(libs.espresso.core)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+    implementation("io.github.gautamchibde:audiovisualizer:2.2.5")
+
 }

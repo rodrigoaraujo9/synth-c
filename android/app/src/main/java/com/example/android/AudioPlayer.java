@@ -4,6 +4,7 @@ import android.content.Context;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
+import android.util.Log;
 
 public class AudioPlayer {
     public AudioTrack audioTrack;
@@ -29,5 +30,7 @@ public class AudioPlayer {
         audioTrack.setVolume(AudioTrack.getMaxVolume());
 
         audioTrack.play();
+
+        Log.d("SESSION", String.valueOf(audioTrack.getAudioSessionId()));
     }
 }

@@ -52,7 +52,7 @@
 #define BASE_AMP 0.2f
 #define BASE_FREQ 440.0f // A4
 #define BASE_NOTE 69     // A4
-#define BASE_TYPE ma_waveform_type_sawtooth
+#define BASE_TYPE ma_waveform_type_sine
 
 // Input Bounds
 #define NOTE_MAX 128

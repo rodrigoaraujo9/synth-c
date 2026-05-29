@@ -21,31 +21,17 @@ public class Client extends Thread {
     private final DatagramSocket socket;
     private final byte[] buffer = new byte[BUFFER_BYTES];
     private final int serverPort;
+    public AudioPlayer audioPlayer;
 
     public Client(int serverPort) throws SocketException {
         socket = new DatagramSocket();
         this.serverPort = serverPort;
+
+        audioPlayer = new AudioPlayer();
     }
 
     @Override
     public void run() {
-        int minBuf = AudioTrack.getMinBufferSize(
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_OUT_STEREO,
-                AudioFormat.ENCODING_PCM_FLOAT
-        );
-
-        AudioTrack audioTrack = new AudioTrack(
-                AudioManager.STREAM_MUSIC,
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_OUT_STEREO,
-                AudioFormat.ENCODING_PCM_FLOAT,
-                Math.max(minBuf, BUFFER_BYTES),
-                AudioTrack.MODE_STREAM
-        );
-        audioTrack.setVolume(AudioTrack.getMaxVolume());
-        audioTrack.play();
-
         try {
             byte[] sendData = "hi".getBytes();
             DatagramPacket sendPacket = new DatagramPacket(
@@ -74,7 +60,7 @@ public class Client extends Thread {
                         .asFloatBuffer()
                         .get(floatBuffer);
 
-                audioTrack.write(floatBuffer, 0, floatCount, AudioTrack.WRITE_BLOCKING);
+                audioPlayer.audioTrack.write(floatBuffer, 0, floatCount, AudioTrack.WRITE_BLOCKING);
             } catch (IOException e) {
                 Log.e("CLIENT", "receive failed", e);
             }
