@@ -842,7 +842,7 @@ void *send_audio_udp(void *arg) {
 
         for (;;) {
             void* readBuffer;
-            ma_uint32 frames_to_read = 5;
+            ma_uint32 frames_to_read = 480;
 
             if (ma_pcm_rb_acquire_read(&g_udpBuf, &frames_to_read, (void**)&readBuffer) == MA_SUCCESS) {
                 size_t bytes = frames_to_read * CHANNELS * sizeof(float);
