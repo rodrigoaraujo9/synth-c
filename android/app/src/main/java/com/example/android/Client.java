@@ -36,7 +36,7 @@ public class Client extends Thread {
             byte[] sendData = "hi".getBytes();
             DatagramPacket sendPacket = new DatagramPacket(
                     sendData, sendData.length,
-                    InetAddress.getByName("10.0.2.2"), serverPort
+                    InetAddress.getByName("192.168.56.187"), serverPort
             );
             socket.send(sendPacket);
         } catch (IOException e) {
