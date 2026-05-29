@@ -842,7 +842,7 @@ void *send_audio_udp(void *arg) {
 
         for (;;) {
             void* readBuffer;
-            ma_uint32 frames_to_read = 100;
+            ma_uint32 frames_to_read = 200;
 
             if (ma_pcm_rb_acquire_read(&g_udpBuf, &frames_to_read, (void**)&readBuffer) == MA_SUCCESS) {
                 size_t bytes = frames_to_read * CHANNELS * sizeof(float);
@@ -851,7 +851,7 @@ void *send_audio_udp(void *arg) {
                     sendto(sockfd, readBuffer, bytes, 0,
                         (struct sockaddr*)&clientaddr, clientlen);
                 } else {
-                    usleep(1000);
+                    usleep(500);
                 }
 
                 ma_pcm_rb_commit_read(&g_udpBuf, frames_to_read);
