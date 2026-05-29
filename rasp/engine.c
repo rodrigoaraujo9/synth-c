@@ -560,45 +560,45 @@ void update_envelopes() {
     /* Chords for Nangs by Tame Impala */
 
     if (g_conf.buttons[0] != 0) {
-        add_note(new_notes, 81-12-12);
-        add_note(new_notes, 60-12); // C
-        add_note(new_notes, 64-12); // E
-        add_note(new_notes, 67-12); // G
-        add_note(new_notes, 71-12); // B
+        add_note(new_notes, 57); // A3 (bass)
+        add_note(new_notes, 48); // C3
+        add_note(new_notes, 52); // E3
+        add_note(new_notes, 55); // G3
+        add_note(new_notes, 59); // B3
     }
 
     if (g_conf.buttons[1] != 0) {
-        add_note(new_notes, 67-12-12); // G
-        add_note(new_notes, 67-12);    // G
-        add_note(new_notes, 72-12);    // C
-        add_note(new_notes, 74-12);    // D
-        add_note(new_notes, 77-12);    // F
-        add_note(new_notes, 81-12);    // A
+        add_note(new_notes, 43); // G2 (bass)
+        add_note(new_notes, 55); // G3
+        add_note(new_notes, 60); // C4
+        add_note(new_notes, 62); // D4
+        add_note(new_notes, 65); // F4
+        add_note(new_notes, 69); // A4
     }
 
     if (g_conf.buttons[2] != 0) {
-        add_note(new_notes, 81-12-12);
-        add_note(new_notes, 60-12); // C
-        add_note(new_notes, 64-12); // E
-        add_note(new_notes, 67-12); // G
-        add_note(new_notes, 71-12); // B
+        add_note(new_notes, 57); // A3 (bass)
+        add_note(new_notes, 48); // C3
+        add_note(new_notes, 52); // E3
+        add_note(new_notes, 55); // G3
+        add_note(new_notes, 59); // B3
     }
 
     if (g_conf.buttons[3] != 0) {
-        add_note(new_notes, 63-12-12); // Eb
-        add_note(new_notes, 63-12);    // Eb
-        add_note(new_notes, 67-12);    // G
-        add_note(new_notes, 70-12);    // Bb
-        add_note(new_notes, 74-12);    // D
+        add_note(new_notes, 39); // Eb2 (bass)
+        add_note(new_notes, 51); // Eb3
+        add_note(new_notes, 55); // G3
+        add_note(new_notes, 58); // Bb3
+        add_note(new_notes, 62); // D4
     }
 
     if (g_conf.buttons[4] != 0) {
-        add_note(new_notes, 68-12-12); // Ab
-        add_note(new_notes, 68-12); // Ab
-        add_note(new_notes, 72-12); // C
-        add_note(new_notes, 75-12); // Eb
-        add_note(new_notes, 79-12); // G
-        add_note(new_notes, 82-12); // Bb
+        add_note(new_notes, 44); // Ab2 (bass)
+        add_note(new_notes, 56); // Ab3
+        add_note(new_notes, 60); // C4
+        add_note(new_notes, 63); // Eb4
+        add_note(new_notes, 67); // G4
+        add_note(new_notes, 70); // Bb4
     }
 
     for (ma_uint32 note = 0; note < MAX_NOTES; note++) {
