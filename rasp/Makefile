@@ -1,6 +1,6 @@
-CC = clang
-CFLAGS =
-LDFLAGS = -framework CoreAudio -framework AudioToolbox -framework CoreFoundation -lpthread -lm
+CC = gcc
+CFLAGS = -Wall -Wextra -O2
+LDFLAGS = -lpthread -lm -ldl
 
 TARGET = synth
 SRC = engine.c
