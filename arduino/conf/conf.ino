@@ -24,18 +24,18 @@ typedef struct __attribute__((packed)) {
 
 /* Wiring */
 
-const int wave_buttonPin = 49;
-const int buttonPins[5] = {22, 23, 24, 25, 26};
+const int wave_buttonPin = 45;
+const int buttonPins[5] = {4, 5, 6, 7, 8};
 
-const int potPins[5] = {A15, A11, A12, A13, A14};
+const int potPins[5] = {A15, A0, A1, A2, A3};
 
-const int x_pin = A0;
-const int y_pin = A1;
+const int x_pin = A11;
+const int y_pin = A12;
 
-const int trigPin = 52;
-const int echoPin = 53;
+const int trigPin = 48;
+const int echoPin = 49;
 
-const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+const int rs = 40, en = 41, d4 = 34, d5 = 35, d6 = 32, d7 = 33;
 
 /*-----------------------------------------------------------------------------------------------------------*/
 
@@ -157,7 +157,8 @@ void loop() {
   conf.joystick[0] = analogRead(x_pin);
   conf.joystick[1] = analogRead(y_pin);
 
-  conf.ultrasonic = distance;
+  // conf.ultrasonic = distance;
+  conf.ultrasonic = 0;
 
   for (int i = 0; i < 5; i++) {
     uint8_t reading = !digitalRead(buttonPins[i]);

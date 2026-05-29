@@ -654,7 +654,10 @@ int read_packet(int sfd, Packet *out) {
 
     // Verify integrity of the packet
 
-    if (out->end != PACKET_END || out->start != PACKET_START || out->checksum != checksum(out)) return 0;
+    // if (out->end != PACKET_END || out->start != PACKET_START || out->checksum != checksum(out)) return 0;
+
+    if (out->end != PACKET_END || out->start != PACKET_START) return 0;
+
 
     return 1;
 }
@@ -981,7 +984,7 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
             case SET_RELEASE: {
                 ma_float release = event_value_as_float(event.value);
 
-                if (release > SUSTAIN_MAX || release < SUSTAIN_MIN) {
+                if (release > SET_RELEASE || release < SET_RELEASE) {
                     printf("*error* out of bounds release value on SET_RELEASE event");
                     break;
                 }
@@ -1290,7 +1293,7 @@ int main(void) {
     #else
         // main
 
-        // // A simple demo
+        // A simple demo
         Event c3_on = { NOTE_PRESSED, 48 +12 };
         Event e3_on = { NOTE_PRESSED, 52 +12 };
         Event g3_on = { NOTE_PRESSED, 55 +12 };
