@@ -560,11 +560,7 @@ void update_envelopes() {
     /* Chords for Nangs by Tame Impala */
 
     if (g_conf.buttons[0] != 0) {
-        add_note(new_notes, 57); // A3 (bass)
-        add_note(new_notes, 48); // C3
-        add_note(new_notes, 52); // E3
-        add_note(new_notes, 55); // G3
-        add_note(new_notes, 59); // B3
+        add_note(new_notes, 69); // A4
     }
 
     if (g_conf.buttons[1] != 0) {
