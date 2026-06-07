@@ -85,6 +85,7 @@
 #define HPF_CUTOFF_MAX 4000.0f
 #define HPF_CUTOFF_MIN 20.0f
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Types */
@@ -163,6 +164,7 @@ typedef struct __attribute__((packed)) {
   uint8_t end;
 } Packet;
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Globals */
@@ -185,6 +187,7 @@ static ma_rb g_eventBuf;
 static unsigned char g_eventBufStore[sizeof(Event) * 256];
 
 static ma_pcm_rb g_udpBuf;
+
 
 /* ------------------------------------------------------------------------------------------------------------- */
 
@@ -377,6 +380,7 @@ static inline ma_float envelope_step(ma_uint32 note, ma_float a, ma_float d, ma_
     return env->gain;
 }
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Normalization */
@@ -515,52 +519,10 @@ void add_note(uint8_t notes[MAX_NOTES], ma_uint32 note) {
 void update_envelopes() {
     uint8_t new_notes[MAX_NOTES] = {0};
 
-    /* Chords for Idioteque by Radiohead for demo */
-
-    // if (g_conf.buttons[0] != 0) {
-    //     add_note(new_notes, 50); // D3
-    //     add_note(new_notes, 55); // G3
-    //     add_note(new_notes, 58); // Bb3
-    //     add_note(new_notes, 64); // E4
-    // }
-
-    // if (g_conf.buttons[1] != 0) {
-    //     add_note(new_notes, 51); // Eb3
-    //     add_note(new_notes, 58); // Bb3
-    //     add_note(new_notes, 62); // D4
-    //     add_note(new_notes, 65); // F4
-    //     add_note(new_notes, 67); // G4
-    //     add_note(new_notes, 70); // Bb4
-    //     add_note(new_notes, 74); // D5
-    // }
-
-    // if (g_conf.buttons[2] != 0) {
-    //     add_note(new_notes, 43); // G2
-    //     add_note(new_notes, 50); // D3
-    //     add_note(new_notes, 58); // Bb3
-    //     add_note(new_notes, 62); // D4
-    // }
-
-    // if (g_conf.buttons[3] != 0) {
-    //     add_note(new_notes, 39); // Eb2
-    //     add_note(new_notes, 46); // Bb2
-    //     add_note(new_notes, 50); // D3
-    //     add_note(new_notes, 53); // F3
-    //     add_note(new_notes, 55); // G3
-    // }
-
-    // if (g_conf.buttons[4] != 0) {
-    //     add_note(new_notes, 62); // D4
-    //     add_note(new_notes, 67); // G4
-    //     add_note(new_notes, 70); // Bb4
-    //     add_note(new_notes, 76); // E5
-    // }
-
-
     /* Chords for Nangs by Tame Impala */
 
     if (g_conf.buttons[0] != 0) {
-        add_note(new_notes, 69); // A4
+        add_note(new_notes, 69); // DEMO note
     }
 
     if (g_conf.buttons[1] != 0) {
@@ -659,6 +621,7 @@ void update() {
     update_envelopes();
 }
 
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Communication */
@@ -755,8 +718,10 @@ void *poll_conf(void *arg) {
 
         g_conf = packet;
 
-        printf("joystick: %d, %d, pot: %d, ultra: %f, adsr: %d, %d, %d, %d, buttons: %d, %d, %d, %d, %d\n", g_conf.joystick[0], g_conf.joystick[1], g_conf.potentiometers[0], g_conf.ultrasonic, g_conf.potentiometers[1], g_conf.potentiometers[2], g_conf.potentiometers[3], g_conf.potentiometers[4], g_conf.buttons[0], g_conf.buttons[1], g_conf.buttons[2], g_conf.buttons[3], g_conf.buttons[4]);
-
+        printf("joystick: %d, %d, pot: %d, ultra: %f, adsr: %d, %d, %d, %d, buttons: %d, %d, %d, %d, %d\n",
+            g_conf.joystick[0], g_conf.joystick[1], g_conf.potentiometers[0], g_conf.ultrasonic,
+            g_conf.potentiometers[1], g_conf.potentiometers[2], g_conf.potentiometers[3], g_conf.potentiometers[4],
+            g_conf.buttons[0], g_conf.buttons[1], g_conf.buttons[2], g_conf.buttons[3], g_conf.buttons[4]);
 
         update();
     }
@@ -846,6 +811,8 @@ void *send_audio_udp(void *arg) {
         }
     }
 }
+
+
 /* ------------------------------------------------------------------------------------------------------------- */
 
 /* Node Graph */
@@ -1171,8 +1138,6 @@ void data_callback(ma_device *pDevice, void *pOutput, const void *pInput, ma_uin
 /* Main */
 
 int main(void) {
-
-
     ma_result result;
 
     result = ma_rb_init(sizeof(g_eventBufStore), g_eventBufStore, NULL, &g_eventBuf);
