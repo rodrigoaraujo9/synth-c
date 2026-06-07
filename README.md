@@ -31,6 +31,8 @@ Overall, the arduino polls the physical controls, compacts them and sends them a
 
 ### Hardware
 
+![Hardware diagram](slides/images/hardware_diagram.png)
+
 To build the controller you need the following components:
 
 - Arduino (Mega)
