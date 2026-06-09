@@ -107,3 +107,11 @@ The Raspberry Pi expects the Arduino to be connected through serial communicatio
 You should be able to play the synthesizer just by connecting headphones to the Raspberry Pi.
 
 The android app and UDP communication is wonky so run the synthesizer before spinning up the android app.
+
+## Our build!
+
+We made our build with default Arduino gear, a Raspberry Pi 4 with a cooling system which came in handy and Android Studio for the app (none of us carried an android so it had to do).
+
+![Build](slides/images/build.jpeg)
+
+[Here](slides/images/demo.mp4) is a simple demo of what the synth can do and the effects avaliable.
